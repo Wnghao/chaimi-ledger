@@ -621,12 +621,16 @@ def _run_tool(ledger_id: int, args: dict) -> tuple[str, dict | None]:
               "categories": [{"name": c["name"], "net": c["net"]} for c in cats]}
     hint = (args.get("category") or "").strip()
     if hint:
-        attach["category"] = hint
-        attach["matched"] = any(hint in c["name"] or c["name"] in hint for c in cats)
-        if attach["matched"]:
+        # 命中判定与取数同一口径（评估 R-06）：先把简称归一化到规范分类名（「餐饮」→「餐饮美食」），
+        # SQL 侧按归一化名精确匹配——旧版 matched 用模糊判定、取数用精确匹配，
+        # 简称命中时 matched=true 却查不出明细（items 恒空、前端显示矛盾）。
+        hit = next((c["name"] for c in cats if hint in c["name"] or c["name"] in hint), None)
+        attach["category"] = hit or hint
+        attach["matched"] = hit is not None
+        if hit:
             # 命中：流水卡片数据（txRow 所需列）+ 总笔数（COUNT OVER 一次取回；≤5 直接全显，>5 出缩略+点击看全部）
             rows = dbm.fetch_tx_rows(conn, ledger_id, flow=ft, dfrom=dfrom, dto=dto,
-                                     category=hint, limit=5, over_count=True)
+                                     category=hit, limit=5, over_count=True)
             attach["items"] = [{k: v for k, v in dbm.tx_to_dict(r).items() if k != "cnt"} for r in rows]
             attach["total"] = rows[0]["cnt"] if rows else 0
     return result, attach

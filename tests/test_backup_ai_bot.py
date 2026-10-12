@@ -136,5 +136,27 @@ class TestBotChain(EnvCase):
         self.assertIsNone(out["booking"])
 
 
+class TestRunToolCategoryMatch(EnvCase):
+    def test_short_name_normalized_to_canonical(self):
+        import ai
+        cid = self.topCat("餐饮美食")
+        self.dbm.insert_tx(self.conn, self.lid, type="expense", amount=3000,
+                           category_id=cid, date="2026-09-05", name="午饭")
+        self.conn.commit()
+        _, attach = ai._run_tool(self.lid, {"kind": "category", "category": "餐饮",
+                                            "range": "month", "month": "2026-09"})
+        self.assertTrue(attach["matched"])
+        self.assertEqual(attach["category"], "餐饮美食")          # 简称归一化到规范名
+        self.assertEqual(attach["total"], 1)
+        self.assertEqual(attach["items"][0]["name"], "午饭")      # 旧版此处恒空（R-06 口径分叉）
+
+    def test_unmatched_no_items(self):
+        import ai
+        _, attach = ai._run_tool(self.lid, {"kind": "category", "category": "不存在的分类",
+                                            "range": "month", "month": "2026-09"})
+        self.assertFalse(attach["matched"])
+        self.assertNotIn("items", attach)
+
+
 if __name__ == "__main__":
     unittest.main()

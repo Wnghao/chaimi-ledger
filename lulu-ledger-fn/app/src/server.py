@@ -1286,13 +1286,21 @@ class BotMsgIn(BaseModel):
     text: str = ""
     user: str = "gateway"
 
+def _token_ok(authorization: str, token: str) -> bool:
+    """常量时间 Bearer 校验（评估 R-08）：逐字节比较不随匹配长度泄漏时序；
+    非 ASCII 头（compare_digest 对 str 的限制）直接判失败。"""
+    try:
+        return secrets.compare_digest(authorization, f"Bearer {token}")
+    except (TypeError, UnicodeError):
+        return False
+
 def _bot_guard(authorization: str) -> None:
     """B 通道双门：mode=gateway 才放行 + Bearer Token 校验（设置页生成/重置）。"""
     cfg = _bot_cfg()
     if cfg.get("mode") != "gateway":
         raise HTTPException(403, "机器人未启用网关模式（App 设置→微信机器人）")
     token = cfg.get("api_token") or ""
-    if not token or authorization != f"Bearer {token}":
+    if not token or not _token_ok(authorization, token):
         raise HTTPException(401, "Token 无效（设置→微信机器人→生成 Token）")
 
 @app.post("/api/bot/message")

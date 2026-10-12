@@ -39,6 +39,19 @@ class TestSafeName(unittest.TestCase):
         self.assertEqual(server._safe_name("icon-64.png"), "icon-64.png")
 
 
+class TestTokenOk(unittest.TestCase):
+    def test_constant_time_bearer_compare(self):
+        self.assertTrue(server._token_ok("Bearer abc123", "abc123"))
+        self.assertFalse(server._token_ok("Bearer abc124", "abc123"))   # 错 Token
+        self.assertFalse(server._token_ok("abc123", "abc123"))          # 缺 Bearer 前缀
+        self.assertFalse(server._token_ok("", "abc123"))
+        self.assertFalse(server._token_ok("Token abc123", "abc123"))    # 非 Bearer 方案
+
+    def test_non_ascii_header_fails_closed(self):
+        # compare_digest 对非 ASCII str 会抛 TypeError：必须判失败而非 500
+        self.assertFalse(server._token_ok("Bearer 中文头", "abc123"))
+
+
 class TestLinkRefund(EnvCase):
     def _mk(self, ttype="expense", amount=5000, date="2026-09-05", ledger=None):
         lid = ledger if ledger is not None else self.lid
