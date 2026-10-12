@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# 卸载向导选择消费：remove_logs=delete 时清除应用日志。
+# 配置（@appconf/lulu.conf）与 PKGVAR 里的数据库/备份不受影响。
+
+if [ "$remove_logs" = "delete" ]; then
+    rm -f /var/log/apps/lulu-ledger.* 2>/dev/null
+    PKGVAR="${TRIM_PKGVAR:-}"
+    if [ -n "$PKGVAR" ]; then
+        rm -f "${PKGVAR}/info.log" 2>/dev/null
+    fi
+fi
+
+exit 0

@@ -1,0 +1,238 @@
+#!/bin/bash
+#
+# main —— lulu-ledger 唯一生命周期控制器(start / stop / restart / status)。
+# 职责：管理 lulu-server(FastAPI)。SQLite 数据在可写数据基目录的 lulu.db,
+# 应用监听 Unix socket 由飞牛统一网关代理。
+# 均无 root；socket 按网关规范必须建在 ${TRIM_APPDEST}/target 下（专用用户对应用目录可写），
+# chmod 666 保证网关侧读写。
+# 是 root，专用用户不可写；DB/日志/PID/依赖全落第一个真正可写的基目录。
+# 目录尚未创建,install_init 只体检不下载,避免装到 /tmp 兜底位后启动时重复下载。
+# 退出码：0 成功/运行中，1 失败，3 status 未运行。
+set -u
+
+# Python 运行时来自应用中心依赖包（manifest install_dep_apps=python312）：
+# fnOS 系统不保证自带 python3，统一前置运行时 bin 后再探测；系统 python3 存在时仅作回落
+for _RT in /var/apps/python*/target/bin; do [ -d "$_RT" ] && PATH="$_RT:$PATH"; done
+export PATH
+
+APP_DIR="${TRIM_APPDEST:-}"
+GATEWAY_SOCKET="${APP_DIR}/app.sock"
+PY="$(command -v python3 || echo /usr/bin/python3)"
+APP_SRC="${APP_DIR}/src/server.py"
+
+# 目录真实可写判定(探测文件法):mkdir 成功≠可写(属主/挂载限制),touch 成功才算
+dir_writable() { (cd "$1" 2>/dev/null && touch .lulu_probe 2>/dev/null && rm -f .lulu_probe); }
+
+# 可写数据基目录:PKGVAR(框架指定,启动时已创建且属主为专用用户)→PKGHOME(专用用户家目录)
+# →PKGTMP→/tmp 兜底
+pick_var_base() {
+    for _C in "${TRIM_PKGVAR:-}" "${TRIM_PKGHOME:-}" "${TRIM_PKGTMP:-}" "/tmp/lulu-ledger"; do
+        [ -n "${_C}" ] || continue
+        mkdir -p "${_C}" 2>/dev/null
+        dir_writable "${_C}" && { printf '%s' "${_C}"; return 0; }
+    done
+    return 1
+}
+VAR_BASE="$(pick_var_base || true)"
+if [ -z "${VAR_BASE}" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - main: 无可写数据目录(PKGVAR/PKGHOME/PKGTMP 均不可用)" \
+        > "${TRIM_TEMP_LOGFILE:-/dev/stderr}" 2>/dev/null
+    exit 1
+fi
+
+LOG_FILE="${VAR_BASE}/info.log"
+PID_FILE="${VAR_BASE}/lulu.pid"
+SITE="${VAR_BASE}/site-packages"
+
+log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"; }
+
+fail() {
+    echo "$1" > "${TRIM_TEMP_LOGFILE:-/dev/stderr}"
+    log_msg "$1"
+    return 1
+}
+
+check_process() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+
+cleanup_socket() {
+    if [ -e "${GATEWAY_SOCKET}" ]; then
+        rm -f "${GATEWAY_SOCKET}"
+        log_msg "已清理残留 socket ${GATEWAY_SOCKET}"
+    fi
+}
+
+# 基目录回落(≠TRIM_PKGVAR)时,把 root 属主的旧数据一次性接续到基目录:
+# 旧文件通常 644 可读,拷贝即可;基目录新文件就位(存在)后不再重复拷
+adopt_legacy_data() {
+    [ -n "${TRIM_PKGVAR:-}" ] && [ "${TRIM_PKGVAR}" != "${VAR_BASE}" ] && [ -d "${TRIM_PKGVAR}" ] || return 0
+    for _F in lulu.db lulu.db-wal lulu.db-shm; do
+        if [ -r "${TRIM_PKGVAR}/${_F}" ] && [ ! -e "${VAR_BASE}/${_F}" ]; then
+            cp -f "${TRIM_PKGVAR}/${_F}" "${VAR_BASE}/${_F}" 2>/dev/null \
+                && log_msg "已接续旧数据 ${_F}: ${TRIM_PKGVAR} → ${VAR_BASE}" \
+                || log_msg "警告:旧数据 ${_F} 接续失败(${TRIM_PKGVAR} → ${VAR_BASE})"
+        fi
+    done
+    if [ -d "${TRIM_PKGVAR}/receipts" ] && [ ! -e "${VAR_BASE}/receipts" ]; then
+        cp -rp "${TRIM_PKGVAR}/receipts" "${VAR_BASE}/receipts" 2>/dev/null \
+            && log_msg "已接续旧票据目录 receipts/" \
+            || log_msg "警告:旧票据目录 receipts/ 接续失败"
+    fi
+}
+
+# TRIM_PKGETC 同样可能 root 属主不可写:配置挪到基目录(旧配置能读则带上),经 LULU_CONF 指定;
+# PKGETC 可写(框架正常准备)时不动,配置仍留在框架指定目录
+ensure_conf() {
+    [ -n "${TRIM_PKGETC:-}" ] || return 0
+    dir_writable "${TRIM_PKGETC}" && return 0
+    [ -r "${TRIM_PKGETC}/lulu.conf" ] && [ ! -e "${VAR_BASE}/lulu.conf" ] && \
+        cp -f "${TRIM_PKGETC}/lulu.conf" "${VAR_BASE}/lulu.conf" 2>/dev/null && \
+        log_msg "已接续旧配置 lulu.conf → ${VAR_BASE}"
+    export LULU_CONF="${VAR_BASE}/lulu.conf"
+    log_msg "TRIM_PKGETC 不可写,配置改用 ${LULU_CONF}"
+}
+
+status_app() {
+    if [ -f "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if check_process "${pid}"; then return 0; fi
+        rm -f "${PID_FILE}"
+    fi
+    return 1
+}
+
+ensure_site() {
+    # Python 依赖就位检查+安装(唯一安装点,install_init 只体检)。
+    # 逐包核对 requirements(名称剥掉版本约束,- 归一化为 _):
+    # 有任一缺包就整包重装——升级新增依赖时靠重启自愈
+    REQ="${APP_DIR}/src/requirements.txt"
+    if [ -d "${SITE}/fastapi" ] && [ -f "${REQ}" ]; then
+        _MISS=0
+        while IFS= read -r _LINE; do
+            _PKG=$(printf '%s' "${_LINE}" | sed -e 's/[#<>=!~;].*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr 'A-Z-' 'a-z_')
+            case "${_PKG}" in ""|\[*|*.txt) continue ;; esac
+            # pip 名与安装目录不一致的包(import 名映射):否则每次重启都误判缺失整包重装
+            case "${_PKG}" in
+                pycryptodome)      _DIRS="Crypto" ;;
+                python_multipart)  _DIRS="multipart python_multipart" ;;
+                *)                 _DIRS="${_PKG}" ;;
+            esac
+            _FOUND=0
+            for _D in ${_DIRS}; do
+                [ -d "${SITE}/${_D}" ] && _FOUND=1 && break
+            done
+            if [ "${_FOUND}" = "0" ]; then
+                _MISS=1
+                log_msg "依赖缺失: ${_PKG}(目录候选: ${_DIRS}),将重装 requirements"
+                break
+            fi
+        done < "${REQ}"
+        [ "${_MISS}" = "0" ] && return 0
+    fi
+    if [ ! -f "${REQ}" ]; then
+        fail "缺少 ${REQ}"
+        return 1
+    fi
+    log_msg "安装 Python 依赖到 ${SITE} ..."
+    # 重装前清空:pip --target 叠装会残留旧版本 dist-info(先建目录再清,glob 永远有效)
+    mkdir -p "${SITE}" 2>/dev/null
+    rm -rf "${SITE}"/*
+    # pip 用应用中心 Python 运行时自带的(官方运行时含 pip;manifest install_dep_apps
+    # =python312 保证装应用前运行时已就绪,真机验证 python312 带 pip 24.0)
+    run_pip() { python3 -m pip "$@"; }
+    for IDX in "https://mirrors.ustc.edu.cn/pypi/simple" \
+               "https://mirrors.aliyun.com/pypi/simple/" \
+               "https://pypi.tuna.tsinghua.edu.cn/simple" \
+               "https://pypi.org/simple"; do
+        log_msg "使用 PyPI 源: ${IDX}"
+        if run_pip install --break-system-packages --no-compile --no-cache-dir \
+            --timeout 15 --retries 2 --disable-pip-version-check \
+            --index-url "${IDX}" --target "${SITE}" -r "${REQ}" >> "${LOG_FILE}" 2>&1; then
+            log_msg "Python 依赖安装完成(${IDX})"
+            return 0
+        fi
+        log_msg "源 ${IDX} 失败,尝试下一个 ..."
+    done
+    fail "Python 依赖安装失败（网络？），详见 ${LOG_FILE}"
+    return 1
+}
+
+start_app() {
+    if status_app; then return 0; fi
+    if [ ! -x "${PY}" ] || [ ! -f "${APP_SRC}" ]; then
+        fail "系统 python3 或 ${APP_SRC} 缺失"
+        return 1
+    fi
+    adopt_legacy_data
+    ensure_conf
+    ensure_site || return 1
+    cleanup_socket
+    log_msg "run user: $(id -un 2>/dev/null || echo '?') (TRIM_RUN_USERNAME=${TRIM_RUN_USERNAME:-<unset>}), 数据基目录: ${VAR_BASE}"
+    log_msg "正在启动 lulu-server ..."
+    # TRIM_PKGVAR 传基目录(覆盖框架原值):server 侧 receipts/日志定位与 DB 对齐;
+    # LULU_DB 显式指定,不依赖 config.py 的 TRIM_PKGVAR 回退链
+    TRIM_APPDEST="${APP_DIR}" \
+    TRIM_PKGETC="${TRIM_PKGETC:-}" \
+    TRIM_PKGVAR="${VAR_BASE}" \
+    LULU_DB="${VAR_BASE}/lulu.db" \
+    TRIM_GATEWAY_SOCKET="app.sock" \
+    TRIM_GATEWAY_PREFIX="/app/lulu-ledger" \
+    PYTHONPATH="${SITE}" \
+        "${PY}" "${APP_SRC}" --uds "${GATEWAY_SOCKET}" >> "${LOG_FILE}" 2>&1 &
+    SRV_PID=$!
+    printf "%s" "${SRV_PID}" > "${PID_FILE}"
+    log_msg "lulu-server pid=${SRV_PID}"
+    local i=0
+    while [ ${i} -lt 30 ]; do
+        [ -S "${GATEWAY_SOCKET}" ] && break
+        sleep 1; i=$((i + 1))
+    done
+    if [ -S "${GATEWAY_SOCKET}" ]; then
+        chmod 666 "${GATEWAY_SOCKET}"
+        log_msg "网关 socket 就绪: ${GATEWAY_SOCKET} (/app/lulu-ledger)"
+    else
+        fail "lulu-server 未在 30 秒内就绪，详见 ${LOG_FILE}"
+        return 1
+    fi
+}
+
+stop_app() {
+    if [ -r "${PID_FILE}" ]; then
+        local pid
+        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
+        if check_process "${pid}"; then
+            kill -TERM "${pid}" 2>/dev/null
+            local count=0
+            while check_process "${pid}" && [ ${count} -lt 8 ]; do
+                sleep 1; count=$((count + 1))
+            done
+            check_process "${pid}" && kill -KILL "${pid}" 2>/dev/null
+        fi
+        rm -f "${PID_FILE}"
+    fi
+    cleanup_socket
+}
+
+case "${1:-}" in
+start)
+    start_app && exit 0
+    exit 1
+    ;;
+stop)
+    stop_app
+    exit 0
+    ;;
+restart)
+    stop_app
+    start_app && exit 0
+    exit 1
+    ;;
+status)
+    status_app && exit 0
+    exit 3
+    ;;
+*)
+    fail "未知命令: ${1:-}"
+    exit 1
+    ;;
+esac

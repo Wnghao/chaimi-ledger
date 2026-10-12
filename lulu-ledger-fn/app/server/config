@@ -1,0 +1,17 @@
+{
+    ".url": {
+        "lulu-ledger.web": {
+            "title": "lulu的记账本",
+            "icon": "images/icon-{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/lulu-ledger",
+            "gatewaySocket": "app.sock",
+            "url": "/app/lulu-ledger",
+            "allUsers": false,
+            "control": {
+                "accessPerm": "readonly"
+            }
+        }
+    }
+}

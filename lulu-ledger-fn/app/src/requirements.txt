@@ -1,0 +1,7 @@
+fastapi>=0.111
+uvicorn>=0.30
+openai>=1.40
+openpyxl>=3.1
+python-multipart>=0.0.9
+segno>=1.6
+pycryptodome>=3.20
