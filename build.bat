@@ -35,6 +35,7 @@ rd /s /q "%SRC%\__pycache__" >nul 2>nul
 
 rem === [2.5/3] clean dev runtime data (don't leak into .fpk) ===
 if exist "%~dp0lulu-ledger-fn\app\data\lulu.db*" del /q "%~dp0lulu-ledger-fn\app\data\lulu.db*" >nul 2>nul
+if exist "%~dp0lulu-ledger-fn\app\data\*.log" del /q "%~dp0lulu-ledger-fn\app\data\*.log" >nul 2>nul
 rem local tests write receipts into app\data\receipts (config.receipts_dir dev fallback)
 if exist "%~dp0lulu-ledger-fn\app\data\receipts\*" del /q "%~dp0lulu-ledger-fn\app\data\receipts\*" >nul 2>nul
 

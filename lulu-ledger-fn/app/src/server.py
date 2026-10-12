@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import io
 import json
@@ -29,6 +30,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
 from pydantic import BaseModel
 
 import ai
+import applog
 import backup
 import bot_core
 import bot_ilink
@@ -36,12 +38,47 @@ import config
 import db as dbm
 import import_bill as ib
 
+applog.setup()   # 进程内首个初始化点：后续 get() 的子 logger 统一走双 handler
+log = applog.get("server")
+
 PREFIX = config.TRIM_GATEWAY_PREFIX
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 # 应用图片（头像等，与桌面图标同目录）：后期更换头像直接替换文件即可（路由禁缓存，替换后刷新生效）
 _IMAGES = Path(__file__).resolve().parent.parent / "server" / "images"
 
 app = FastAPI(title="lulu的记账本")
+
+_AUTH_EXEMPT = ("/healthz",)   # NAS 探活放行；其余（含静态资源，浏览器记凭证后自动携带）一律过门
+
+def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
+    """Basic Auth 常量时间校验（评估 R-04 中期项，默认关闭，见 README 部署前提）。"""
+    if not authorization.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    user, sep, pwd = decoded.partition(":")
+    cfg_user = str(cfg.get("username") or "")
+    cfg_pwd = str(cfg.get("password") or "")
+    if not cfg_user or not cfg_pwd:
+        return False   # enabled 但未配置凭证：恒拒绝（fail-closed，测试抓出的空凭证匹配漏洞）
+    return (sep == ":"
+            and secrets.compare_digest(user, cfg_user)
+            and secrets.compare_digest(pwd, cfg_pwd))
+
+@app.middleware("http")
+async def web_auth_guard(request: Request, call_next):
+    """可选 Web 鉴权门（评估 R-04）：lulu.conf 的 web_auth.enabled=true 时启用。
+    定义于 strip_gateway_prefix 之前 → 作为内层中间件拿到剥完网关前缀的路径。
+    凭证为空视为未配置：拒绝并挑战，强制管理员补齐配置（fail-closed）。"""
+    cfg = config.load().get("web_auth") or {}
+    if cfg.get("enabled") and request.url.path not in _AUTH_EXEMPT:
+        if not _basic_auth_ok(request.headers.get("authorization") or "", cfg):
+            return Response(content=b'{"detail":"unauthorized"}', status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="lulu-ledger"'},
+                            media_type="application/json")
+    return await call_next(request)
 
 @app.middleware("http")
 async def strip_gateway_prefix(request: Request, call_next):
@@ -99,15 +136,15 @@ def _startup():
     # 应用文件夹定位诊断：找不到时备份回退 @appdata，日志留痕便于排查
     bot_core._on_change = _bump_rev          # bot 记账/改动 → 唤醒长轮询 → 前端自刷新
     share = config.app_share_dir()
-    print(f"[startup] 应用文件夹: {share or '未找到（备份回退 @appdata/backups）'}")
-    print(f"[startup] lulu-ledger v{_app_version()}")   # 版本留痕:确认线上跑的是哪个包
+    log.info(f"应用文件夹: {share or '未找到（备份回退 @appdata/backups）'}")
+    log.info(f"lulu-ledger v{_app_version()}")   # 版本留痕:确认线上跑的是哪个包
     # 模型自检走后台线程:服务商下线旧模型(如百炼一代 qwen-vl-*)时自动换新,不阻塞启动
     def _model_check():
         try:
             for line in ai.ensure_models():
-                print(line, flush=True)
+                log.info(line)
         except Exception as e:
-            print(f"[llm] 模型自检失败: {e}", flush=True)
+            log.warning(f"模型自检失败: {e}")
     threading.Thread(target=_model_check, daemon=True).start()
     # 小票孤儿文件兜底清理:启动即扫一次(顺带清历史遗留),之后每日一次
     def _sweep():
@@ -115,7 +152,7 @@ def _startup():
             try:
                 sweep_orphan_receipts()
             except Exception as e:
-                print(f"[receipts] 兜底清理异常: {e}")
+                log.warning(f"小票兜底清理异常: {e}")
             time.sleep(24 * 3600)
     threading.Thread(target=_sweep, daemon=True, name="receipt-sweep").start()
 
@@ -1102,6 +1139,7 @@ def backup_download(file: str = Query(...)):
 def logs_download():
     """日志收集打包下载（参考 liuku）：运行日志 + 飞牛安装日志，ZIP 内存打包。"""
     sources: list[tuple[str, Path]] = []          # (zip内路径, 源文件)
+    sources.append(("app/lulu-ledger.log", config.log_path()))   # applog 轮转文件（本地开发也有）
     if config.TRIM_PKGVAR:
         sources.append(("run/info.log", Path(config.TRIM_PKGVAR) / "info.log"))
     for p in sorted(Path("/var/log/apps").glob("lulu-ledger*")):
@@ -1233,7 +1271,7 @@ def discard_receipt(path: str):
         p.unlink()
     except OSError:
         return {"ok": True, "deleted": False}
-    print(f"[receipts] App 取消清理: {name}")
+    log.info(f"App 取消清理小票: {name}")
     return {"ok": True, "deleted": True}
 
 def sweep_orphan_receipts(grace_hours: int = 24) -> int:
@@ -1257,7 +1295,7 @@ def sweep_orphan_receipts(grace_hours: int = 24) -> int:
             except OSError:
                 pass
     if n:
-        print(f"[receipts] 兜底清理 {n} 个无引用小票文件")
+        log.info(f"兜底清理 {n} 个无引用小票文件")
     return n
 
 @app.get("/api/ai/analyze")
@@ -1447,7 +1485,7 @@ def _tcp_sidecar(bind: str, port: int) -> None:
     try:
         uvicorn.run(app, host=bind, port=port, lifespan="off", log_level="warning")
     except Exception as e:   # noqa: BLE001 - sidecar 任何失败都不许拖垮主服务
-        print(f"[tcp-sidecar] {bind}:{port} 启动失败（忽略，B 通道直连不可用）: {e}", flush=True)
+        log.warning(f"tcp-sidecar {bind}:{port} 启动失败（忽略，B 通道直连不可用）: {e}")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

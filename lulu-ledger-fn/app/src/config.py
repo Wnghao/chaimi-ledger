@@ -39,6 +39,9 @@ DEFAULTS: dict = {
         "ilink": {"account_id": "", "token": "", "base_url": ""},
     },
     "theme": "light",
+    # Web 界面可选 Basic Auth（评估 R-04 中期项；默认关——内网自托管依赖 fnOS 网关边界，见 README 部署前提）。
+    # enabled=true 时除 /healthz 外全站过门（浏览器原生弹窗，输一次即记）；用户名/密码常量时间比较。
+    "web_auth": {"enabled": False, "username": "lulu", "password": ""},
 }
 
 TRIM_PKGETC = os.environ.get("TRIM_PKGETC", "")
@@ -66,6 +69,13 @@ def receipts_dir() -> Path:
     if TRIM_PKGVAR:
         return Path(TRIM_PKGVAR) / "receipts"
     return Path(__file__).resolve().parent.parent / "data" / "receipts"
+
+
+def log_path() -> Path:
+    """应用自身运行日志（applog 轮转文件，logs_download 一并收集）。"""
+    if TRIM_PKGVAR:
+        return Path(TRIM_PKGVAR) / "lulu-ledger.log"
+    return Path(__file__).resolve().parent.parent / "data" / "lulu-ledger.log"
 
 
 def app_share_dir() -> Path | None:

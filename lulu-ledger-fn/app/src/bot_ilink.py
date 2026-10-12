@@ -23,6 +23,9 @@ from __future__ import annotations
 
 import base64
 import collections
+import applog
+
+_log = applog.get("bot-ilink")
 import config
 import json
 import os
@@ -159,7 +162,7 @@ def _aes_decrypt(data: bytes, key: bytes) -> bytes:
             plain = plain[:-pad]
         return plain
     except ImportError:
-        print("[bot-ilink] 缺 pycryptodome 依赖,媒体解密不可用(requirements 升级后重启)")
+        _log.info("[bot-ilink] 缺 pycryptodome 依赖,媒体解密不可用(requirements 升级后重启)")
         return data
 
 
@@ -232,7 +235,7 @@ class ILinkBot:
     def _set_state(self, s: str, detail: str = "") -> None:
         with self._lock:
             self._state = {"state": s, "detail": str(detail)[:200]}
-        print(f"[bot-ilink] {s} {detail}"[:220])
+        _log.info(f"[bot-ilink] {s} {detail}"[:220])
 
     # ---------- 登录 ----------
 
@@ -254,7 +257,7 @@ class ILinkBot:
             raise RuntimeError(f"获取二维码失败: {json.dumps(r, ensure_ascii=False)[:160]}")
         img = r.get("qrcode_img_content") or ""
         self._last_qr_img = img
-        print(f"[bot-ilink] qrcode={qr[:24]}... img={img[:96]!r}")   # 真机口径排查用
+        _log.info(f"[bot-ilink] qrcode={qr[:24]}... img={img[:96]!r}")
         self._set_state("pending_scan", "等待扫码")
         t = threading.Thread(target=self._login_waiter, args=(qr,), daemon=True,
                              name="ilink-login")
@@ -278,18 +281,18 @@ class ILinkBot:
                         body = e.read().decode()[:200]
                     except Exception:
                         body = ""
-                    print(f"[bot-ilink] get_qrcode_status HTTP {e.code}: {body}")
+                    _log.warning(f"[bot-ilink] get_qrcode_status HTTP {e.code}: {body}")
                     err_logged = True
                 time.sleep(QR_POLL_INTERVAL)
                 continue
             except (urllib.error.URLError, OSError, ValueError) as e:
                 if not err_logged:
-                    print(f"[bot-ilink] get_qrcode_status 异常: {type(e).__name__}: {e}")
+                    _log.warning(f"[bot-ilink] get_qrcode_status 异常: {type(e).__name__}: {e}")
                     err_logged = True
                 time.sleep(QR_POLL_INTERVAL)
                 continue
             if not logged_raw:
-                print(f"[bot-ilink] qrcode_status 首次响应: {json.dumps(r, ensure_ascii=False)[:400]}")
+                _log.info(f"[bot-ilink] qrcode_status 首次响应: {json.dumps(r, ensure_ascii=False)[:400]}")
                 logged_raw = True
             # 状态字段兼容顶层与 data 嵌套两种形态(微信 API 常见包裹)
             data = r.get("data") if isinstance(r.get("data"), dict) else {}
@@ -323,7 +326,7 @@ class ILinkBot:
                     try:
                         self._on_confirmed(self, creds)
                     except Exception as e:   # 回调失败不影响通道自启
-                        print(f"[bot-ilink] on_confirmed 回调异常: {e}")
+                        _log.warning(f"[bot-ilink] on_confirmed 回调异常: {e}")
                 return
             if st == "binded_redirect":
                 # 扫的 bot 已绑定本客户端：直接复用本地 token（无需重新确认）
@@ -375,7 +378,7 @@ class ILinkBot:
             _request("POST", _api(self._base, f"msg/{path}"), self._token,
                      {"base_info": {"channel_version": CHANNEL_VERSION}}, timeout=5)
         except Exception as e:
-            print(f"[bot-ilink] {path} 失败(忽略): {e}")
+            _log.warning(f"[bot-ilink] {path} 失败(忽略): {e}")
 
     def _poll_loop(self) -> None:
         self._notify("notifystart")
@@ -390,7 +393,7 @@ class ILinkBot:
                 if self._stop.is_set():
                     return
                 if not logged_raw:
-                    print(f"[bot-ilink] getupdates 首次响应: {json.dumps(r, ensure_ascii=False)[:400]}")
+                    _log.info(f"[bot-ilink] getupdates 首次响应: {json.dumps(r, ensure_ascii=False)[:400]}")
                     logged_raw = True
                 if _expired(r):
                     self._set_state("expired", "会话过期，请重新扫码")
@@ -432,8 +435,8 @@ class ILinkBot:
             # 媒体消息(小票图片):下载解密落盘 → bot_core 小票链路
             img = _extract_image(m)
             if img is None:
-                print(f"[bot-ilink] 非文本且无媒体线索(原文留档): "
-                      f"{json.dumps(m, ensure_ascii=False, default=str)[:400]}")
+                _log.info(f"[bot-ilink] 非文本且无媒体线索(原文留档): "
+                          f"{json.dumps(m, ensure_ascii=False, default=str)[:400]}")
                 return
             path = self._fetch_media(img, m)
             if path:
@@ -449,14 +452,14 @@ class ILinkBot:
                                     ledger_id=self._ledger, attribution=self._label)
         except Exception as e:
             kind = "图片" if image_path else "消息"
-            print(f"[bot-ilink] handle 异常({kind}): {e}")
+            _log.warning(f"[bot-ilink] handle 异常({kind}): {e}")
             reply = f"⚠️ {kind}处理出错，请稍后再试。"
         if not reply:
             return
         try:
             self.send_text(msg["user_id"], reply, msg["context_token"])
         except Exception as e:
-            print(f"[bot-ilink] 发送失败({msg['user_id']}): {e}")
+            _log.warning(f"[bot-ilink] 发送失败({msg['user_id']}): {e}")
 
     def _media_url(self, info: dict) -> str:
         """从展平的图片线索字段拼下载地址:完整 URL 直接用;
@@ -477,16 +480,16 @@ class ILinkBot:
         """CDN 下载 + AES 解密 → receipts 目录;返回文件路径。字段结构真机校准用日志齐全。"""
         url = self._media_url(info)
         if not url:
-            print(f"[bot-ilink] 图片消息缺下载地址,字段: "
+            _log.warning(f"[bot-ilink] 图片消息缺下载地址,字段: "
                   f"{json.dumps(info, ensure_ascii=False, default=str)[:300]} 原文: "
                   f"{json.dumps(raw, ensure_ascii=False, default=str)[:400]}")
             return None
-        print(f"[bot-ilink] 媒体下载: {url[:160]}")
+        _log.info(f"[bot-ilink] 媒体下载: {url[:160]}")
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "MicroMessengerClient"})
             data = urllib.request.urlopen(req, timeout=30).read()
         except Exception as e:
-            print(f"[bot-ilink] CDN 下载失败: {type(e).__name__}: {e}")
+            _log.warning(f"[bot-ilink] CDN 下载失败: {type(e).__name__}: {e}")
             return None
         key = _aes_key(info)
         if key:
@@ -495,7 +498,7 @@ class ILinkBot:
         d.mkdir(parents=True, exist_ok=True)
         fname = f"ilink_{time.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}.jpg"
         (d / fname).write_bytes(data)
-        print(f"[bot-ilink] 媒体已落盘: {fname} {len(data)}B aes={'y' if key else 'n'} "
+        _log.info(f"[bot-ilink] 媒体已落盘: {fname} {len(data)}B aes={'y' if key else 'n'} "
               f"字段={list(info.keys())[:8]}")
         return str(d / fname)
 

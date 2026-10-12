@@ -14,6 +14,7 @@ import threading
 from pathlib import Path
 
 import ai
+import applog
 import config
 import db as dbm
 
@@ -27,7 +28,7 @@ def _bump() -> None:
         try:
             _on_change()
         except Exception as e:
-            print(f"[bot-core] on_change 回调异常: {e}")
+            applog.get("bot-core").warning(f"on_change 回调异常: {e}")
 LIST_MAX = 10
 ALL_MAX = 30
 RANK_DOTS = 6             # L1 分类排行圆点条最大点数
@@ -640,6 +641,7 @@ def status(user: str = "gateway") -> dict:
 # ---------- CLI 冒烟（python bot_core.py；不依赖任何通道） ----------
 
 if __name__ == "__main__":
+    applog.setup()   # CLI 独立进程也走统一日志
     dbm.init_db()
     print("lulu 微信机器人大脑 CLI —— 直接输入对话；img <路径> 发小票；q 退出")
     while True:

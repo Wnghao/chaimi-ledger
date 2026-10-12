@@ -52,6 +52,27 @@ class TestTokenOk(unittest.TestCase):
         self.assertFalse(server._token_ok("Bearer 中文头", "abc123"))
 
 
+class TestBasicAuth(unittest.TestCase):
+    CFG = {"username": "lulu", "password": "s3cret"}
+
+    @staticmethod
+    def _hdr(user, pwd):
+        import base64
+        return "Basic " + base64.b64encode(f"{user}:{pwd}".encode()).decode()
+
+    def test_ok_and_rejects(self):
+        self.assertTrue(server._basic_auth_ok(self._hdr("lulu", "s3cret"), self.CFG))
+        self.assertFalse(server._basic_auth_ok(self._hdr("lulu", "wrong"), self.CFG))    # 错密码
+        self.assertFalse(server._basic_auth_ok(self._hdr("admin", "s3cret"), self.CFG))  # 错用户
+        self.assertFalse(server._basic_auth_ok("Bearer abc", self.CFG))                  # 非 Basic
+        self.assertFalse(server._basic_auth_ok("Basic !!!not-base64!!!", self.CFG))      # 坏 base64
+        self.assertFalse(server._basic_auth_ok("Basic " + "6isOo2s6", self.CFG))         # 无冒号分隔
+
+    def test_empty_creds_fail_closed(self):
+        # enabled 但未配置凭证：空用户/密码恒拒绝（fail-closed，强制管理员补齐）
+        self.assertFalse(server._basic_auth_ok(self._hdr("", ""), {"username": "", "password": ""}))
+
+
 class TestLinkRefund(EnvCase):
     def _mk(self, ttype="expense", amount=5000, date="2026-09-05", ledger=None):
         lid = ledger if ledger is not None else self.lid

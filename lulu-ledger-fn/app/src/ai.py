@@ -13,12 +13,13 @@ from typing import Iterator
 
 from openai import OpenAI
 
+import applog
 import config
 import db as dbm
 
 # 记账规则版本：随 ai.py 变更升级，启动日志打印，用于核对线上跑的是不是新代码
 RULES_VERSION = "1.0.0"
-print(f"[ai] booking rules v{RULES_VERSION} loaded")
+applog.get("ai").info(f"booking rules v{RULES_VERSION} loaded")
 
 
 _NO_KEY_HINT = ("未配置 LLM Key：请到「设置」页填写 API Key。"
