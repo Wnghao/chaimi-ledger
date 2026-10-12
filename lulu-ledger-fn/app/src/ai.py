@@ -344,6 +344,17 @@ def _time_fix(text: str, it: dict):
             it["date"] = f"{d} {hm}"
 
 
+def _kw_fallback_category(it: dict) -> None:
+    """条目缺分类名时的关键词兜底（离线正则兜底 / LLM 漏给分类共用）：
+    复用导入侧同一部 TOP_KEYWORD_LEXICON——早餐→餐饮美食、打车→交通出行、
+    红包按小额两级归类，导入与 AI 记一笔口径天然一致。"""
+    if it.get("category_name"):
+        return
+    import import_bill as ib
+    kw = ib._top_by_keyword(f"{it.get('name','')} {it.get('note','')}", it.get("amount"))
+    if kw:
+        it["category_name"] = kw
+
 def _booking_items(raw_items, ledger_id: int | None = None, text: str = "") -> list:
     """条目草稿规范化：只保留有金额的 dict，元换算成分（与前端 amount 单位一致）；
     account 账户名解析成 account_id，解析不到留 None；
@@ -360,6 +371,7 @@ def _booking_items(raw_items, ledger_id: int | None = None, text: str = "") -> l
         it["account_id"] = _resolve_account(ledger_id, it.get("account")) if ledger_id else None
         _gift_fix(text, it)
         _time_fix(text, it)
+        _kw_fallback_category(it)
     if items:
         _income_fix(text, items)
     if items and ledger_id:
@@ -884,6 +896,8 @@ def fix_local(q: str) -> list:
             rest = name[len(cue):]
             if len(rest) >= 2:             # 「发工资8500」→工资 /「收到转账200」→转账;残词太短保留原词
                 name = rest
-        out.append({"type": ttype, "amount": amount, "name": name, "date": today,
-                    "category_name": "", "account": "", "account_id": None, "note": ""})
+        item = {"type": ttype, "amount": amount, "name": name, "date": today,
+                "category_name": "", "account": "", "account_id": None, "note": ""}
+        _kw_fallback_category(item)   # 离线兜底也分类（无 Key 时卡片不再全靠手动选）
+        out.append(item)
     return out

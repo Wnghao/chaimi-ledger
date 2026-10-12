@@ -11,7 +11,13 @@ function dupHintText(dh){
 function aiItems(list, noteText){   // AI 结果 → 弹窗条目：分类名/账户名映射为 id，摘要挂第一笔备注
   return list.map((it, i)=>{
     const type = ["expense","income","transfer"].includes(it.type) ? it.type : "expense";
-    const cat = categories.find(c=>c.type===type && !c.parent_id && c.name===it.category_name);
+    // 分类两段式匹配（与 bot 侧 _resolve_category 同口径）：先按类型精确名，再双向包含
+    // ——LLM/词典给简称（「餐饮」）也能落到「餐饮美食」，不再直接掉到未分类
+    const cat = it.category_name
+      ? (categories.find(c=>c.type===type && !c.parent_id && c.name===it.category_name)
+         || categories.find(c=>c.type===type && !c.parent_id
+                            && (it.category_name.includes(c.name) || c.name.includes(it.category_name))))
+      : null;
     const acc = accounts.find(a=>a.name===it.account);
     return {
       type,

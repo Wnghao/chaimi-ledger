@@ -61,6 +61,26 @@ class TestAIRules(unittest.TestCase):
         self.assertEqual([(i["name"], i["amount"]) for i in items], [("午饭", 2500), ("打车", 1300)])
         self.assertTrue(all(i["date"] for i in items))
 
+    def test_fix_local_keyword_category(self):
+        """离线兜底也自动分类（无 Key 场景）：餐时词/打车走关键词词典，不再全靠手动选。"""
+        import ai
+        items = ai.fix_local("早餐5元 打车15")
+        by_name = {i["name"]: i for i in items}
+        self.assertEqual(by_name["早餐"]["category_name"], "餐饮美食")
+        self.assertEqual(by_name["打车"]["category_name"], "交通出行")
+
+    def test_booking_items_kw_fallback(self):
+        """LLM/兜底条目缺分类名时：关键词兜底补齐（词典同源，含红包两级归类）。"""
+        import ai
+        items = ai._booking_items([
+            {"type": "expense", "amount": 500, "name": "午饭"},
+            {"type": "expense", "amount": 20000, "name": "同事结婚", "note": "份子钱"},
+            {"type": "expense", "amount": 3000, "name": "滴滴出行"},
+        ], None, "")
+        self.assertEqual(items[0]["category_name"], "餐饮美食")
+        self.assertEqual(items[1]["category_name"], "人情往来")   # 200 元档以上份子
+        self.assertEqual(items[2]["category_name"], "交通出行")
+
     def test_fix_local_income_and_decimal(self):
         import ai
         items = ai.fix_local("收到转账200 发了5000工资 早饭4块5")
