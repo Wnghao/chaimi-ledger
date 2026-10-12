@@ -228,7 +228,6 @@ function txRow(t, mode){
   const roTags = [];
   if(ro.receipt_path) roTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${ro.receipt_path}')">🧾</span>`);
   // 例：原支出 4996 + 退款入账 4996 = 0（已全额抵销），而非 9992
-  const signed = (type, amount) => type === "expense" ? -amount : amount;
   const net = signed(ro.type, ro.amount) + signed(t.type, t.amount);
   const netSign = net > 0 ? "+" : net < 0 ? "−" : "";
   const netVal = fmt(Math.abs(net));

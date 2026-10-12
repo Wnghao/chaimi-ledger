@@ -76,7 +76,6 @@ function netSum(items, absorbed){
   let e = 0, i = 0;
   const refundByOrigin = {};
   items.forEach(t=>{ if(t.refund_for) refundByOrigin[t.refund_for] = t; });
-  const signed = (type, amount) => type === "expense" ? -amount : amount;
   items.forEach(t=>{
     if(absorbed && absorbed.has(t.id)){
       const r = refundByOrigin[t.id];

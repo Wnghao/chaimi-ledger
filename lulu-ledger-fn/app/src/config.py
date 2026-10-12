@@ -65,17 +65,18 @@ def db_path() -> Path:
     return Path(__file__).resolve().parent.parent / "data" / "lulu.db"
 
 
-def receipts_dir() -> Path:
+def _pkgvar_or_data(rel: str) -> Path:
+    """@var 下运行时产物（飞牛持久化目录），本地开发回落 app/data/。"""
     if TRIM_PKGVAR:
-        return Path(TRIM_PKGVAR) / "receipts"
-    return Path(__file__).resolve().parent.parent / "data" / "receipts"
+        return Path(TRIM_PKGVAR) / rel
+    return Path(__file__).resolve().parent.parent / "data" / rel
 
+def receipts_dir() -> Path:
+    return _pkgvar_or_data("receipts")
 
 def log_path() -> Path:
     """应用自身运行日志（applog 轮转文件，logs_download 一并收集）。"""
-    if TRIM_PKGVAR:
-        return Path(TRIM_PKGVAR) / "lulu-ledger.log"
-    return Path(__file__).resolve().parent.parent / "data" / "lulu-ledger.log"
+    return _pkgvar_or_data("lulu-ledger.log")
 
 
 def app_share_dir() -> Path | None:

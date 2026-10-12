@@ -10,7 +10,6 @@ import argparse
 import base64
 import csv
 import io
-import json
 import os
 import re
 import secrets
@@ -63,9 +62,7 @@ def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
     cfg_pwd = str(cfg.get("password") or "")
     if not cfg_user or not cfg_pwd:
         return False   # enabled 但未配置凭证：恒拒绝（fail-closed，测试抓出的空凭证匹配漏洞）
-    return (sep == ":"
-            and secrets.compare_digest(user, cfg_user)
-            and secrets.compare_digest(pwd, cfg_pwd))
+    return sep == ":" and _ct_eq(user, cfg_user) and _ct_eq(pwd, cfg_pwd)
 
 @app.middleware("http")
 async def web_auth_guard(request: Request, call_next):
@@ -1324,13 +1321,16 @@ class BotMsgIn(BaseModel):
     text: str = ""
     user: str = "gateway"
 
-def _token_ok(authorization: str, token: str) -> bool:
-    """常量时间 Bearer 校验（评估 R-08）：逐字节比较不随匹配长度泄漏时序；
-    非 ASCII 头（compare_digest 对 str 的限制）直接判失败。"""
+def _ct_eq(a: str, b: str) -> bool:
+    """常量时间字符串比较（Token/Basic Auth 共用）：非 ASCII 输入判失败而非抛异常。"""
     try:
-        return secrets.compare_digest(authorization, f"Bearer {token}")
+        return secrets.compare_digest(a, b)
     except (TypeError, UnicodeError):
         return False
+
+def _token_ok(authorization: str, token: str) -> bool:
+    """常量时间 Bearer 校验（评估 R-08）：逐字节比较不随匹配长度泄漏时序。"""
+    return authorization.startswith("Bearer ") and _ct_eq(authorization, f"Bearer {token}")
 
 def _bot_guard(authorization: str) -> None:
     """B 通道双门：mode=gateway 才放行 + Bearer Token 校验（设置页生成/重置）。"""

@@ -24,6 +24,7 @@ const TX_TYPES = [{v:"expense",t:"支出"},{v:"income",t:"收入"}];
 const esc = s => String(s==null?"":s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));   // 属性值转义
 const pad2 = n => String(n).padStart(2, "0");   // 两位补零（导出时间戳/排他上界/日历格子共用）
 const qEsc = t => String(t==null?"":t).replace(/'/g, "\\'");   // onclick 内联字符串转义（区别于 HTML 转义 esc）
+const signed = (type, amount) => type === "expense" ? -amount : amount;   // 收支符号化金额（日净额/退款净额计算共用）
 /* 分类→色系单源（马卡龙 CSS 变量名对）：tx-card[data-cat] 的 --cat-color/--cat-bg（启动时注入
    <style>）与 txIcon 的内联底色/字色共用这一份，改色只动这里（AI 聊天图标与流水卡永不分叉） */
 const CAT_SKIN = {
