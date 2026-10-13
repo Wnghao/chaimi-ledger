@@ -2,7 +2,7 @@
 
 stdio JSON-RPC（MCP 规范），零第三方依赖；内部经 HTTP 调 lulu-server 的 /api/bot/*。
 挂载（OpenClaw 示例）：
-  LULU_BOT_URL=http://127.0.0.1:8710 LULU_BOT_TOKEN=xxx python3 lulu_mcp.py
+  LULU_BOT_URL=http://127.0.0.1:18710 LULU_BOT_TOKEN=xxx python3 lulu_mcp.py
 
 工具：
   ledger_message(text)      原样转发用户消息，返回机器人回复文本（记账/查账/草稿全链路）
@@ -17,7 +17,7 @@ import sys
 import urllib.request
 import uuid
 
-BASE = os.environ.get("LULU_BOT_URL", "http://127.0.0.1:8710").rstrip("/")
+BASE = os.environ.get("LULU_BOT_URL", "http://127.0.0.1:18710").rstrip("/")
 TOKEN = os.environ.get("LULU_BOT_TOKEN", "")
 
 TOOLS = [{

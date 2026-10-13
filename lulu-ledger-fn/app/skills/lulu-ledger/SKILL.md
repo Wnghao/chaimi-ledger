@@ -22,12 +22,12 @@ description: lulu的记账本(NAS)微信记账助手:一句话记账、小票识
 **方式一:MCP(推荐)**
 
 ```
-LULU_BOT_URL=http://127.0.0.1:8710        # 同机默认;跑在 Docker 容器里连不到宿主机的 127.0.0.1
+LULU_BOT_URL=http://127.0.0.1:18710       # 同机默认;跑在 Docker 容器里连不到宿主机的 127.0.0.1
 LULU_BOT_TOKEN=<生成的Token>
 command: python3 /usr/local/apps/@appcenter/lulu-ledger/src/lulu_mcp.py
 ```
 
-- 真机 lulu-server 在 UDS 之外并行监听 TCP 8710(默认仅 127.0.0.1);
+- 真机 lulu-server 网关模式下在 UDS 之外并行监听 TCP 18710(默认仅 127.0.0.1,其余模式不监听);
   OpenClaw 跑 Docker 时:容器用 `--network host`,或给 lulu 设 `LULU_BOT_BIND=0.0.0.0`
   后把 URL 改成 NAS 内网 IP;lulu_mcp.py 路径对容器需可见(挂载或拷出)。
 - 技能调用超时设 **120 秒**(LLM 解析 2~10s,查账多轮可 20s+)。
@@ -36,7 +36,7 @@ command: python3 /usr/local/apps/@appcenter/lulu-ledger/src/lulu_mcp.py
 **方式二:REST(任何脚本语言)**
 
 ```bash
-curl -s http://127.0.0.1:8710/api/bot/message \
+curl -s http://127.0.0.1:18710/api/bot/message \
   -H "Authorization: Bearer <Token>" \
   -H "Content-Type: application/json" \
   -d '{"text":"午饭25","user":"gateway"}'

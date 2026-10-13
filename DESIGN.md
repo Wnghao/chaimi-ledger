@@ -2,7 +2,7 @@
 
 > 飞牛 NAS（fnOS）原生家庭记账应用。多账本分账 + 账单导入 + 统计看板 + AI 记账 + 微信机器人，数据全在本机 SQLite。
 >
-> 状态：v1.0.1（manifest 版本）已实现并稳定运行，本文描述**当前实现**，规划期版本已精简合并。
+> 状态：v1.0.2（manifest 版本）已实现并稳定运行，本文描述**当前实现**，规划期版本已精简合并。
 
 ***
 
@@ -273,7 +273,7 @@ A（直连）/B（网关）只是「谁持有微信通道」的差别，共用 b
 ### 10.4 通道 B：REST + MCP（外部 Agent 网关）
 
 - `POST /api/bot/message` / `POST /api/bot/receipt` / `GET /api/bot/status`，`Authorization: Bearer {bot.api_token}`；同步接口，LLM 解析 2~10s、查账可 20s+，网关侧超时设 120s
-- 真机 cmd 以 `--uds` 起 server，HTTP 进不了 Unix socket——server 在 UDS 之外并行监听 TCP（`_tcp_sidecar`，`LULU_BOT_BIND` 默认 127.0.0.1，跨容器置 0.0.0.0，off 关闭）
+- 真机 cmd 以 `--uds` 起 server，HTTP 进不了 Unix socket——server 在 UDS 之外并行监听 TCP（`_sidecar_apply`：**仅 gateway 模式启动**、随 bot.mode 热切换优雅启停，默认部署不常驻白跑端口；`LULU_BOT_BIND` 默认 127.0.0.1，端口默认 18710（`LULU_BOT_PORT` 可覆盖），跨容器置 0.0.0.0，off 关闭）
 - **lulu_mcp.py**（stdio MCP server，三工具）：`ledger_message`（原样转发）/ `ledger_receipt` / `ledger_status`。工具描述写死约束：凡涉记账查账必须原样调用 ledger_message，禁止网关 LLM 自行解析金额、编造账目——lulu 的调优提示词是唯一大脑，OpenClaw 只当管道
 - `skills/lulu-ledger/`：纯 REST 技能包（SKILL.md），与 MCP 二选一，随 fpk 上机
 
@@ -338,3 +338,4 @@ cmd/main：系统 python3 + PYTHONPATH=site-packages 直跑；启动时依赖双
 |---|---|---|
 | 2026-10-12 | **v1.0.0** 交付基线 | 功能全集：多账本记账、支付宝/微信/京东账单导入（自动分类 + 退款匹配 + 去重）、统计看板（日历/饼图/趋势/人情往来）、AI 记账与查账（一句话/小票/月度分析）、微信机器人双通道（iLink 直连 + 网关/MCP）、分层备份；4 份真实账单端到端验证（净支出与官方汇总精确到分一致） |
 | 2026-10-13 | **v1.0.1** 交付加固 | 依据《交付评估报告》P0~P2 整改，功能零变化：XSS 转义闭环（11 处）、Bearer 常量时间比较、Web 层可选 Basic Auth（默认关）、git 基线 + 49 用例测试门禁接入 build.bat、依赖精确锁定、applog 日志轮转、AI 无 Key 分类词典兜底、备份与待确认口径修补——明细见 `CHANGELOG.md` |
+| 2026-10-13 | **v1.0.2** 安全加固 + 仓库开源化 | CSV 公式注入中和、备份文件名白名单、图片魔数校验、上传安全闸重构、AI 记一笔分类词典兜底 + 前端两段式匹配；manifest 补仓库地址、build.bat 本地专用、文档重构；49→59 用例全绿——明细见 `CHANGELOG.md` |

@@ -50,8 +50,16 @@ class TestBackupRetention(unittest.TestCase):
 
     def test_name_validation(self):
         self.assertTrue(self.backup._valid_name("lulu-ledger-202601.db"))
-        for bad in ("../x", "a/b", "other.db", ""):
+        for bad in ("../x", "a/b", "other.db", "",
+                    "lulu-ledger-202601.conf.json",    # 副文件（含明文 Key）不可经 API 触达
+                    "lulu-ledger-202601.receipts.zip"):
             self.assertFalse(self.backup._valid_name(bad))
+
+    def test_restore_rejects_non_sqlite_file(self):
+        """复查项④：非 SQLite 文件恢复 → ValueError（server 映射 400），不再裸 500。"""
+        (self._tmp / "lulu-ledger-bad.db").write_bytes(b"definitely not a sqlite file")
+        with self.assertRaises(ValueError):
+            self.backup.restore_backup("lulu-ledger-bad.db")
 
 
 class TestAIRules(unittest.TestCase):

@@ -184,7 +184,7 @@ function selHtml(){   // 状态 B：选择用户（上次使用的排最前并�
       <button class="lg-uitem" onclick="pick(${g.id})">
         ${avCell(g)}
         <span class="lg-uinfo"><span class="lg-uname">${esc(g.name)}</span>
-          <span class="lg-umeta">${g.id===SAVED ? "上次使用 · " : ""}${g.members ? esc(g.members) : "暂无账单归属映射"}</span></span>
+          <span class="lg-umeta">${g.id===SAVED ? "上次使用 · " : ""}${g.members ? esc(g.members) : "暂无账单归属"}</span></span>
         <span class="lg-uarrow">›</span>
       </button>`).join("")}
       <button class="lg-uitem lg-uadd" onclick="newUser()">＋ 新建用户</button>

@@ -2,7 +2,7 @@
 
 运行形态：
   飞牛：  server.py --uds ${TRIM_APPDEST}/app.sock    经统一网关 /app/lulu-ledger 访问
-  本地：  server.py --host 127.0.0.1 --port 8710      开发调试
+  本地：  server.py --host 127.0.0.1 --port 18710     开发调试
 """
 from __future__ import annotations
 
@@ -99,12 +99,14 @@ def _bot_cfg() -> dict:
     return config.load().get("bot") or {}
 
 def _bot_apply() -> None:
-    """机器人热切换（DESIGN 十章）：direct=按凭证列表差量启停;其余全停。"""
+    """机器人热切换（DESIGN 十章）：direct=按凭证列表差量启停;其余全停。
+    sidecar 随 mode 一并差量启停（仅 gateway 模式监听 TCP，默认部署不常驻白跑端口）。"""
     cfg = config.load()
     if (cfg.get("bot") or {}).get("mode") == "direct":
         _ilink.apply(bot_ilink.ilink_entries(cfg))
     else:
         _ilink.stop_all()
+    _sidecar_apply()
 
 def _app_version() -> str:
     """应用版本号:优先 build 时生成的 static/version.txt(真机部署树无 manifest),
@@ -883,22 +885,28 @@ def stats_renqing(ledger: int):
 MAX_UPLOAD = 20 * 1024 * 1024
 ALLOWED_EXT = (".csv", ".xlsx")
 
+def _upload_guard(filename: str | None, data: bytes) -> None:
+    """导入上传安全闸（防恶意文件）：扩展名白名单 + 大小上限 + xlsx 魔数校验。
+    行数熔断由 import_bill._capped（解析期）与本函数调用后的 len 校验（权威上限）接力。"""
+    fn = (filename or "").lower()
+    if not fn.endswith(ALLOWED_EXT):
+        raise HTTPException(400, "仅支持 .csv / .xlsx 文件")
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(400, "文件超过 20MB 上限")
+    if fn.endswith(".xlsx") and data[:2] != b"PK":
+        raise HTTPException(400, "文件内容不是有效 xlsx")
+
 @app.post("/api/import/parse")
 async def import_parse(ledger: int, file: UploadFile = File(...), use_ai: bool = True):
     _ledger_or_404(ledger)
-    if not file.filename or not file.filename.lower().endswith(ALLOWED_EXT):
-        raise HTTPException(400, "仅支持 .csv / .xlsx 文件")
     data = await file.read()
-    if len(data) > MAX_UPLOAD:
-        raise HTTPException(400, "文件超过 20MB 上限")
-    if file.filename.lower().endswith(".xlsx") and not data[:2] == b"PK":
-        raise HTTPException(400, "文件内容不是有效 xlsx")
+    _upload_guard(file.filename, data)
     try:
         flows = ib.parse_bill(data, file.filename)
     except Exception as e:
         raise HTTPException(400, f"解析失败: {e}")
-    if len(flows) > 50000:
-        raise HTTPException(400, "行数超过上限 5 万行")
+    if len(flows) > ib.MAX_PARSE_ROWS:
+        raise HTTPException(400, "行数超过上限 5 万行")   # 京东拆行会让 flows 数超过行数，仍以行数常量为权威上限
     previews = ib.build_previews(conn(), ledger, flows)
     if use_ai:
         ai.resolve_subcategories_batch(previews, ledger)
@@ -950,20 +958,28 @@ def _csv_download_headers(ledger_id: int, ext: str = "csv") -> dict:
     quoted = quote(f"{stem}.{ext}")
     return {"Content-Disposition": f"attachment; filename=ledger-{time.strftime('%Y%m%d')}.{ext}; filename*=UTF-8''{quoted}"}
 
+def _neut(v) -> str:
+    """公式注入中和（OWASP 惯例）：账单/用户可控文本以 = + - @ 或 TAB/CR 开头时前缀单引号，
+    防"导入恶意账单 → 导出 CSV/xlsx → Excel/WPS 打开"时单元格被当公式执行；
+    代价是此类开头的正常文本（如 -5折）导出带前导 '，Excel 显示时还原为原文。"""
+    s = str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
 def _export_table(rows, ledger_id: int) -> list:
     """导出表（CSV/xlsx 共用）：14 列全量格式，流水卡片上的数据全列出。
     金额保留分→元的换算由调用方格式化；交易名称=name（回落备注/分类，与卡片标题同口径）；
     流水归属=解析后名字（有组显组名）；转账两端账户分「支付账户/收款账户」两列；
-    流水ID/退款关联——导出回环：导入时按 ID 直连退款对，无需重新匹配。"""
+    流水ID/退款关联——导出回环：导入时按 ID 直连退款对，无需重新匹配。
+    用户/账单可控的文本列一律 _neut 中和；日期/金额/ID 等本源列不涉及。"""
     type_map = {"expense": "支出", "income": "收入", "transfer": "不计收支"}
     cur_row = conn().execute("SELECT currency FROM ledgers WHERE id=?", (ledger_id,)).fetchone()
     cur_code = (cur_row["currency"] if cur_row else None) or "CNY"
     return [["交易时间", "交易名称", "交易金额", "币种", "流水类型", "支出类型/收入类型",
              "支付账户", "收款账户", "小票", "流水归属", "备注", "订单号", "来源",
              "流水ID", "退款关联"]] + [
-        [r["date"], r["name"] or r["note"] or r["category"] or "", r["amount"] / 100, cur_code,
-         type_map[r["type"]], r["category"] or "", r["account"] or "", r["to_account"] or "",
-         "", r["attr_display"] or "", r["note"] or "", r["order_no"] or "", r["source"] or "",
+        [r["date"], _neut(r["name"] or r["note"] or r["category"] or ""), r["amount"] / 100, cur_code,
+         type_map[r["type"]], _neut(r["category"] or ""), _neut(r["account"] or ""), _neut(r["to_account"] or ""),
+         "", _neut(r["attr_display"] or ""), _neut(r["note"] or ""), _neut(r["order_no"] or ""), _neut(r["source"] or ""),
          r["id"], r["refund_for"] or ""] for r in rows]
 
 @app.get("/api/receipts/export")
@@ -1041,8 +1057,8 @@ def export(ledger: int, _from: str = Query("", alias="from"), to: str = "", form
         ws2 = wb.create_sheet("归属统计")
         ws2.append(["流水归属", "笔数", "支出", "收入", "包含归属"])
         for r in _attribution_rows(ledger, _from, _to_end(to) if to else ""):
-            ws2.append([r["person"], r["cnt"], r["expense"] / 100, r["income"] / 100,
-                        "、".join(m["person"] for m in r.get("members", []))])
+            ws2.append([_neut(r["person"]), r["cnt"], r["expense"] / 100, r["income"] / 100,
+                        _neut("、".join(m["person"] for m in r.get("members", [])))])
         buf = io.BytesIO()
         wb.save(buf)
         return StreamingResponse(iter([buf.getvalue()]),
@@ -1106,21 +1122,22 @@ def do_backup():
 def get_backups():
     return backup.list_backups()
 
-@app.post("/api/restore")
-def do_restore(body: dict):
+def _backup_call(op, name: str) -> None:
+    """备份操作（restore/delete）公共异常映射：文件名非法/非数据库/不存在统一 400。"""
     try:
-        backup.restore_backup(body.get("file", ""))
+        op(name)
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(400, str(e))
+
+@app.post("/api/restore")
+def do_restore(body: dict):
+    _backup_call(backup.restore_backup, body.get("file", ""))
     dbm.init_db()
     return {"ok": True}
 
 @app.post("/api/backups/delete")
 def backup_delete(body: dict):
-    try:
-        backup.delete_backup(body.get("file", ""))
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(400, str(e))
+    _backup_call(backup.delete_backup, body.get("file", ""))
     return {"ok": True}
 
 @app.get("/api/backups/download")
@@ -1155,7 +1172,8 @@ def logs_download():
         for rel, p in sources:
             if p.is_file():
                 try:
-                    zf.writestr(rel, p.read_text(encoding="utf-8", errors="ignore"))
+                    # 二进制原样入包：read_text 会把轮转的 *.gz 压缩内容按 UTF-8 读坏成乱码
+                    zf.writestr(rel, p.read_bytes())
                 except OSError:
                     pass
     name = f"lulu-ledger-logs-{time.strftime('%Y%m%d-%H%M%S')}.zip"
@@ -1232,12 +1250,16 @@ def ai_parse(ledger: int, body: AiParseIn):
     return ai.parse_booking(body.text, ledger, date.today().strftime("%Y-%m-%d"))
 
 async def _save_receipt(file: UploadFile) -> tuple[Path, str]:
-    """上传小票落盘（/api/ai/receipt 与 /api/bot/receipt 共用）：时间戳随机名，返回 (路径, 相对名)。"""
+    """上传小票落盘（/api/ai/receipt 与 /api/bot/receipt 共用）：魔数校验 + 时间戳随机名。
+    WEBP 以 .jpg 扩展名落盘（浏览器/视觉模型按内容嗅探，孤儿清扫的扩展名集合不变）。"""
+    data = await file.read()
+    if not bot_core.is_image(data):
+        raise HTTPException(400, "小票仅支持 JPG / PNG / WEBP 图片")
     d = config.receipts_dir()
     d.mkdir(parents=True, exist_ok=True)
     fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}.jpg"
     p = d / fname
-    p.write_bytes(await file.read())
+    p.write_bytes(data)
     return p, f"receipts/{fname}"
 
 @app.post("/api/ai/receipt")
@@ -1477,29 +1499,49 @@ def bot_ilink_qrimg():
     return Response(buf.getvalue(), media_type="image/png",
                     headers={"Cache-Control": "no-cache"})
 
-def _tcp_sidecar(bind: str, port: int) -> None:
-    """B 通道 TCP 直连（与 UDS 并行）：飞牛部署只有 Unix socket，容器/外部进程
-    （OpenClaw 的 MCP/REST）走 HTTP 进不来，需要一条不经飞牛网关的 TCP 通道
-    （DESIGN 10.4）。独立线程隔离——端口被占等失败只损失直连不影响主服务；
-    lifespan=off：启动钩子（备份/清扫/bot 线程）由 UDS 主服务独跑，不重复。"""
+_SIDECAR: dict = {"server": None}   # 当前 sidecar 实例（None=未启动）；should_exit 置位即优雅退出
+
+def _sidecar_run(srv) -> None:
+    """线程体：独立线程隔离（失败只损失直连不影响主服务）；退出后注销实例。"""
     try:
-        uvicorn.run(app, host=bind, port=port, lifespan="off", log_level="warning")
+        srv.run()
     except Exception as e:   # noqa: BLE001 - sidecar 任何失败都不许拖垮主服务
-        log.warning(f"tcp-sidecar {bind}:{port} 启动失败（忽略，B 通道直连不可用）: {e}")
+        log.warning(f"tcp-sidecar 启动失败（忽略，B 通道直连不可用）: {e}")
+    finally:
+        if _SIDECAR["server"] is srv:
+            _SIDECAR["server"] = None
+
+def _sidecar_apply() -> None:
+    """B 通道 TCP 直连（与 UDS 并行，DESIGN 10.4）——飞牛部署只有 Unix socket，
+    容器/外部进程（OpenClaw 的 MCP/REST）走 HTTP 进不来，需要一条不经飞牛网关的 TCP 通道。
+    随 bot.mode 差量启停（_bot_apply 调用，与轮询线程/网关开关同一条热切换链）：
+    gateway=按 LULU_BOT_BIND/LULU_BOT_PORT 监听（默认 127.0.0.1:18710）；其余模式优雅停。
+    lifespan=off：启动钩子由 UDS 主服务独跑不重复；端口独立于 --port（本地开发主服务口）。"""
+    want = _bot_cfg().get("mode") == "gateway"
+    bind = os.environ.get("LULU_BOT_BIND", "127.0.0.1")
+    if bind.lower() in ("off", "", "0"):
+        return
+    srv = _SIDECAR["server"]
+    if want and srv is None:
+        # log_config=None：sidecar 不重配进程级 uvicorn logger——否则其 warning 级配置
+        # 会把主服务的访问日志（INFO）一并静默（真机 10-13 实测：热切网关后 info.log 失明）
+        srv = uvicorn.Server(uvicorn.Config(
+            app, host=bind, port=int(os.environ.get("LULU_BOT_PORT", "18710")),
+            lifespan="off", log_config=None))
+        _SIDECAR["server"] = srv   # 先登记再起线程：快速切换时防重复启动
+        log.info(f"tcp-sidecar 监听 {bind}:{srv.config.port}（网关模式）")
+        threading.Thread(target=_sidecar_run, args=(srv,), daemon=True, name="tcp-sidecar").start()
+    elif not want and srv is not None:
+        srv.should_exit = True   # uvicorn serve 循环检查位：优雅退出
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--uds")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8710)
+    ap.add_argument("--port", type=int, default=18710)
     args = ap.parse_args()
     if args.uds:
-        # LULU_BOT_BIND: 默认 127.0.0.1 仅本机；OpenClaw 容器跨网桥访问时置 0.0.0.0；off 关闭
-        bind = os.environ.get("LULU_BOT_BIND", "127.0.0.1")
-        port = int(os.environ.get("LULU_BOT_PORT", str(args.port)))
-        if bind.lower() not in ("off", "", "0"):
-            threading.Thread(target=_tcp_sidecar, args=(bind, port), daemon=True,
-                             name="tcp-sidecar").start()
+        # B 通道 TCP 直连由 _startup→_bot_apply→_sidecar_apply 按 bot.mode 差量启停（仅 gateway 监听）
         uvicorn.run(app, uds=args.uds, log_level="info")
     else:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")

@@ -33,7 +33,7 @@
 飞牛 fnOS 网关与你的局域网边界；机器人网关接口（`/api/bot/*`）则有独立 Bearer Token。
 
 - ✅ 适合：家庭 NAS、内网服务器、Tailscale/WireGuard 等私有组网
-- ⛔ 不要：将网关反代或 8710 端口直接暴露到公网（任何人可读写全部账目）
+- ⛔ 不要：将网关反代或 18710 端口直接暴露到公网（任何人可读写全部账目）
 - 依赖版本已锁定（见 `app/src/requirements.txt`）：升级依赖需先跑测试再提交
 
 **可选：开启 Web 层 Basic Auth**（v1.0.1+，需要比内网边界多一层门时）
@@ -57,10 +57,10 @@
 ```bash
 cd lulu-ledger-fn/app/src
 pip install -r requirements.txt
-python server.py --host 127.0.0.1 --port 8710
+python server.py --host 127.0.0.1 --port 18710
 ```
 
-浏览器打开 <http://127.0.0.1:8710> 即可。数据库会自动创建在 `app/data/lulu.db`。
+浏览器打开 <http://127.0.0.1:18710> 即可。数据库会自动创建在 `app/data/lulu.db`。
 
 ## 📦 构建 fpk
 

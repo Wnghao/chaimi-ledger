@@ -344,6 +344,7 @@ async function refreshStats(){
   }
   // 分类饼图 + 趋势（仅在统计页可见时绘制，避免隐藏容器中初始化导致尺寸错乱）
   const noData = !cats.length && !trend.length && !attrs.length;
+  $("#statsEmpty").textContent = `${sbLabel(statRange)} · 暂无数据`;   // 空态文案随范围（月/年/全部/自定义），不写死"本月"
   $("#statsEmpty").style.display = noData ? "block" : "none";
   $("#catCard").style.display = cats.length ? "" : "none";
   $("#catIncCard").style.display = catsInc.length ? "" : "none";

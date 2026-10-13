@@ -233,9 +233,16 @@ class ILinkBot:
         return self._last_qr_img
 
     def _set_state(self, s: str, detail: str = "") -> None:
+        detail = str(detail)[:200]
         with self._lock:
-            self._state = {"state": s, "detail": str(detail)[:200]}
-        _log.info(f"{s} {detail}"[:220])
+            prev = self._state
+            self._state = {"state": s, "detail": detail}
+        # 状态未变的例行刷新（长轮询每 ~18s 一跳 logged_in）降 DEBUG（applog INFO 级即静默）；
+        # 状态迁移（error→logged_in 恢复、凭证过期等）仍 INFO。在线状态查询走 /api/bot/ilink/status，不靠日志。
+        if prev.get("state") == s and prev.get("detail") == detail:
+            _log.debug(f"{s} {detail}"[:220])
+        else:
+            _log.info(f"{s} {detail}"[:220])
 
     # ---------- 登录 ----------
 
@@ -442,6 +449,8 @@ class ILinkBot:
             path = self._fetch_media(img, m)
             if path:
                 self._respond(msg, "", image_path=path)
+            else:
+                self._reply_raw(msg, "⚠️ 未收到有效图片（仅支持 JPG/PNG 小票照片），请重发图片")
             return
         self._respond(msg, msg["text"])
 
@@ -455,10 +464,13 @@ class ILinkBot:
             kind = "图片" if image_path else "消息"
             _log.warning(f"handle 异常({kind}): {e}")
             reply = f"⚠️ {kind}处理出错，请稍后再试。"
-        if not reply:
-            return
+        if reply:
+            self._reply_raw(msg, reply)
+
+    def _reply_raw(self, msg: dict, text: str) -> None:
+        """不经 bot 大脑的直接回发（媒体拒收提示等运维消息）。"""
         try:
-            self.send_text(msg["user_id"], reply, msg["context_token"])
+            self.send_text(msg["user_id"], text, msg["context_token"])
         except Exception as e:
             _log.warning(f"发送失败({msg['user_id']}): {e}")
 
@@ -495,6 +507,9 @@ class ILinkBot:
         key = _aes_key(info)
         if key:
             data = _aes_decrypt(data, key)
+        if not bot_core.is_image(data):   # 微信直连媒体同款魔数闸：非图片字节（视频/文件等）不落盘
+            _log.info(f"媒体内容非图片,已拒收: {len(data)}B aes={'y' if key else 'n'}")
+            return None
         d = config.receipts_dir()
         d.mkdir(parents=True, exist_ok=True)
         fname = f"ilink_{time.strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}.jpg"

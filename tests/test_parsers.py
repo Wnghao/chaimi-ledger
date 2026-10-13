@@ -102,5 +102,22 @@ class TestHashAndAccount(EnvCase):
         self.assertIsNone(ib._match_account(c, self.lid, "export", "不存在的怪账户"))
 
 
+class TestRowCap(unittest.TestCase):
+    """解析期行数熔断（复查项②）：超限在迭代中抛出，不再全量物化。"""
+
+    def test_capped_passes_within_limit(self):
+        self.assertEqual(len(list(ib._capped(range(100)))), 100)
+
+    def test_capped_raises_over_limit(self):
+        with self.assertRaises(ValueError):
+            list(ib._capped(range(ib.MAX_PARSE_ROWS + 500)))
+
+    def test_alipay_overload_stopped_in_parser(self):
+        head = "交易时间,交易分类,交易对方,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注\n"
+        body = "2026-09-01 08:30:00,餐饮美食,肯德基,早餐,支出,25.50,余额宝,交易成功,1,1,\n"
+        with self.assertRaises(ValueError):
+            ib.parse_alipay(head + body * (ib.MAX_PARSE_ROWS + 500))
+
+
 if __name__ == "__main__":
     unittest.main()

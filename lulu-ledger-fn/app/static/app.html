@@ -255,7 +255,7 @@
     <section class="page" id="tab-stats">
       <div class="card chart-card" id="attrCard" style="display:none">
         <b>归属统计</b>
-        <span class="sub" style="margin-left:8px">按账单账号（微信昵称 / 京东账号名 / 支付宝姓名）汇总</span>
+        <span class="sub" style="margin-left:8px">按流水归属汇总 · 账单账号自动识别 · 同一人的多账号可在设置页归组</span>
         <div id="attrList"></div>
       </div>
       <div class="donut-pair">
@@ -275,7 +275,7 @@
         </div>
       </div>
       <div class="card chart-card" id="trendCard" style="display:none"><b>月度趋势（支出 / 收入）</b><div style="height:200px"><canvas id="trendChart"></canvas></div></div>
-      <div class="card chart-card" id="statsEmpty" style="display:none;color:var(--muted)">本月暂无数据</div>
+      <div class="card chart-card" id="statsEmpty" style="display:none;color:var(--muted)">当前范围暂无数据</div>
     </section>
 
     <!-- ===== 人情往来 ===== -->
@@ -295,7 +295,7 @@
       <!-- 区块 1：导入账单 -->
       <div class="card">
         <b>导入账单</b>
-        <div class="sub" style="margin-top:2px">支持微信 支付宝 京东流水导入</div>
+        <div class="sub" style="margin-top:2px">支持微信（xlsx）/ 支付宝、京东（CSV）/ 本应用导出文件，平台按内容自动识别</div>
         <div class="sub" style="margin-top:4px;color:var(--warn,#e8a93a)">京东账单建议往前多导 10 天，避免跨月退款漏匹配</div>
         <details style="margin-top:8px">
           <summary class="sub" style="cursor:pointer">怎么导出账单文件？</summary>
@@ -327,6 +327,7 @@
       <!-- 区块 3：导出账单 -->
       <div class="card" style="margin-top:12px">
         <b>导出账单</b>
+        <div class="sub" style="margin-top:2px">CSV / xlsx 全量导出（含退款关联、归属、双账户）；导出文件可再导入，无损还原</div>
         <div class="exp-row">
           <div class="exp-dates">
             <div class="exp-field">
@@ -485,7 +486,7 @@
         </div>
         <!-- ② 账本与成员(直连模式) -->
         <div id="bot_dir" style="display:none">
-          <div class="sub" style="margin-bottom:6px">扫哪个账本的码就记哪本,绑定哪个用户记的账就自动带其归属;成员用自己的微信扫(需 ClawBot 插件)即绑定。一个微信号只能绑定一个账本用户,扫新码会顶替旧绑定。</div>
+          <div class="sub" style="margin-bottom:6px">扫哪个账本的码就记哪本，绑定哪个用户记的账就自动带其归属；成员用自己的微信扫码即绑定。一个微信号只能绑定一个账本用户，扫新码会顶替旧绑定。</div>
           <div class="row" style="align-items:end;gap:8px;flex-wrap:wrap">
             <div><label>账本</label><select id="bot_lg_sel" onchange="botLedgerUsers()"></select></div>
             <div><label>用户</label><select id="bot_user_sel"></select></div>
@@ -513,7 +514,7 @@
               <button class="btn btn-ghost" style="flex:0 0 auto" onclick="copyMcpCfg()">复制</button>
             </div>
             <pre id="bot_mcp_cfg" style="white-space:pre-wrap;margin:0 0 8px;font-size:12px;line-height:1.7"></pre>
-            <div class="sub">· 网关白名单默认已含 <b>gateway</b>（MCP 固定传此标识，自动放行）· 工具调用超时设 <b>120 秒</b>（LLM 解析 2~10s，查账可 20s+）<br>· 备选 REST：POST /api/bot/message（Header: Authorization: Bearer Token；Body: {"text":"午饭25","user":"gateway"}）；小票 POST /api/bot/receipt（multipart 图片）</div>
+            <div class="sub">复制前先点「生成 / 重置」——Token 行会自动填入完整值；下方白名单里的 <b>gateway</b> 是 MCP 固定调用标识，请勿删除（删掉后网关调用会被拒）。</div>
           </div>
           <div style="margin-top:10px"><label>网关白名单（网关标识；MCP 固定传 gateway，默认已含）</label>
             <textarea id="bot_gw_users" rows="2" style="width:100%"></textarea></div>
@@ -595,7 +596,8 @@
       <button class="icon-btn" onclick="closePv()" title="关闭">✕</button>
     </div>
     <div class="modal-body">
-      <div id="pv_summary" class="sub" style="margin-bottom:10px"></div>
+      <div id="pv_summary" class="sub" style="margin-bottom:6px"></div>
+      <div class="sub" style="margin-bottom:10px">标签：待确认＝低置信稍后处理 · 已导入＝重复将跳过 · ⚠️＝同日同额疑似重复（点击可跳过该行） · 退款＝已关联原消费 · 退回＝未找到原消费</div>
       <div id="pv_body" class="pv-list"></div>
     </div>
     <div class="modal-foot">

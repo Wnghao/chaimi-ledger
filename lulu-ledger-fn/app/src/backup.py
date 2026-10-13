@@ -21,8 +21,11 @@ import db
 _SIDE_SUFFIXES = (".conf.json", ".receipts.zip")
 
 def _valid_name(name: str) -> bool:
-    """备份文件名安全校验（restore/delete/download 共用）。"""
-    return not ("/" in name or "\\" in name or ".." in name or not name.startswith("lulu-"))
+    """备份文件名安全校验（restore/delete/download 共用）：
+    lulu- 前缀白名单 + .db 后缀限定——副文件（.conf.json 含明文 API Key）
+    与任意改名文件一律不可经这三个入口触达（副文件只随主文件联动，见 _SIDE_SUFFIXES）。"""
+    return (name.startswith("lulu-") and name.endswith(".db")
+            and "/" not in name and "\\" not in name and ".." not in name)
 
 def _locate(name: str):
     """校验文件名安全并定位备份主文件（restore/delete/download 共用）；不存在抛 FileNotFoundError。"""
@@ -77,10 +80,14 @@ def list_backups() -> list[dict]:
 def restore_backup(name: str) -> None:
     """恢复：校验文件名安全 + integrity_check 通过才覆盖。"""
     src_file = _locate(name)
-    # 先校验备份完整性
+    # 先校验备份完整性；非 SQLite 文件统一转 ValueError（server 映射 400，不再裸 500）
     chk = sqlite3.connect(src_file)
-    ok = chk.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    chk.close()
+    try:
+        ok = chk.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    except sqlite3.DatabaseError as e:
+        raise ValueError(f"备份文件不是有效的 SQLite 数据库: {e}") from e
+    finally:
+        chk.close()
     if not ok:
         raise ValueError("备份文件完整性校验失败")
     # 旧实现"临时文件替换 db"在 Linux 下各线程缓存的旧连接仍读旧 inode（恢复"看似没生效"的根因），

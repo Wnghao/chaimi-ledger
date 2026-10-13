@@ -354,6 +354,15 @@ async function restore(f){
 }
 
 let _ilinkTimer = null, _qrTimer = null;
+let _botTokenPlain = "";   // 生成/重置后的明文（GET /api/config 只回掩码，刷新页面后回占位符）
+function botMcpCfgText(){
+  return "前提: 模式选「网关」并保存——TCP 18710 自动监听（MCP 走此 HTTP 口，无需手动启动服务）\n" +
+         "LULU_BOT_URL=http://127.0.0.1:18710\n" +
+         "LULU_BOT_TOKEN=" + (_botTokenPlain || "<点「生成 / 重置」后自动填入>") + "\n" +
+         "command: python3 /usr/local/apps/@appcenter/lulu-ledger/src/lulu_mcp.py\n" +
+         "超时: 工具调用设 120 秒（LLM 解析 2~10s，查账/月报可 20s+）\n" +
+         "工具: ledger_message(text) / ledger_receipt(path_url) / ledger_status()";
+}
 const ILINK_STATE_CN = {off:"未启动", pending_scan:"等待扫码", scaned:"已扫码待确认",
   logged_in:"已连接 ✓", expired:"凭证过期", error:"连接异常"};
 
@@ -366,12 +375,8 @@ async function loadBotCfg(){
   $("#bot_gw_users").value = (b.gateway_users || []).length ? b.gateway_users.join(", ") : "gateway";
   $("#bot_token").value = b.api_token || "";
   $("#bot_token").placeholder = b.api_token ? "已设置（点生成/重置可更换）" : "未生成";
-  // MCP 挂载四要素;OpenClaw 与 lulu 同机,URL 固定回环直连口
-  $("#bot_mcp_cfg").textContent =
-    "LULU_BOT_URL=http://127.0.0.1:8710\n" +
-    "LULU_BOT_TOKEN=<上方生成的 API Token>\n" +
-    "command: python3 /usr/local/apps/@appcenter/lulu-ledger/src/lulu_mcp.py\n" +
-    "工具: ledger_message(text) / ledger_receipt(path_url) / ledger_status()";
+  // MCP 挂载四要素;OpenClaw 与 lulu 同机,URL 固定回环直连口;Token 行在生成/重置后自动填入明文
+  $("#bot_mcp_cfg").textContent = botMcpCfgText();
   botGwVis();
   await botLedgers();
   await botMembers();
@@ -503,6 +508,8 @@ async function genBotToken(){
   if($("#bot_token").value && !await uiConfirm("重置后旧 Token 立即失效，网关侧需同步更换。确定重置？","重置"))return;
   const r = await api("/api/bot/token",{method:"POST"});
   $("#bot_token").value = r.token;
+  _botTokenPlain = r.token;   // MCP 配置行同步填入明文，「复制」即得完整可用配置
+  $("#bot_mcp_cfg").textContent = botMcpCfgText();
   const ok = copyText(r.token);
   msg(ok ? "已生成并复制 ✅（仅此一次完整显示）" : "已生成，请立即复制（仅此一次完整显示）", ok);
 }

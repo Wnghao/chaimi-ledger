@@ -361,6 +361,13 @@ def _remove_tx(tid: int) -> None:
         old_path = dbm.delete_tx(c, tid)
     unlink_receipt(old_path)
 
+def is_image(data: bytes) -> bool:
+    """图片内容魔数校验（JPG/PNG/WEBP）：App 上传 / 网关 bot_receipt / 微信直连媒体下载
+    三路共用——只放行图片字节，任意内容（脚本/HTML 等）不落盘。"""
+    return (data[:3] == b"\xff\xd8\xff"
+            or data[:8] == b"\x89PNG\r\n\x1a\n"
+            or (data[:4] == b"RIFF" and data[8:12] == b"WEBP"))
+
 def unlink_receipt(receipt_path: str | None) -> None:
     """删小票文件（bot/server 共用的唯一入口）：按文件名拼 receipts 目录，
     None/空串/失败一律静默——清理永不阻断主流程。"""

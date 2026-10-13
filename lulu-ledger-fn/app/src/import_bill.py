@@ -52,6 +52,18 @@ def parse_dt(s: str) -> str:
 def _row_hash(fields: list[str]) -> str:
     return hashlib.md5("|".join(normalize(f) for f in fields).encode("utf-8")).hexdigest()
 
+# 解析期行数熔断上限（防高压缩比 xlsx / 超长 CSV 的解析期内存放大）；
+# server.import_parse 的 len(flows) 校验引用同一常量作权威上限
+MAX_PARSE_ROWS = 50_000
+
+def _capped(rows):
+    """行迭代熔断：超限抛 ValueError（import_parse 统一转 400）。
+    余量 200 行给各平台表头前的导出信息块。"""
+    for i, row in enumerate(rows):
+        if i > MAX_PARSE_ROWS + 200:
+            raise ValueError("行数超过上限 5 万行")
+        yield row
+
 def _hash_fields(get, keys: list[str], amt_key: str, amt_cents: int | None = None) -> list:
     """构造 hash 字段列表（各平台解析器共用）：金额列(amt_key)规范化为整数分字符串
     （amt_cents 已给出则直接用，如京东拆括号后的原金额），其余列原样。"""
@@ -136,7 +148,7 @@ def _detect_owner(rows, h) -> str:
     return ""
 
 def parse_alipay(text: str) -> list[RawFlow]:
-    rows = list(csv.reader(io.StringIO(text)))
+    rows = list(_capped(csv.reader(io.StringIO(text))))
     h = _find_header(rows, "交易时间")
     if h < 0:
         raise ValueError("未找到支付宝表头（交易时间）")
@@ -178,7 +190,7 @@ _WX_TRANSFER_ONLY = frozenset(dbm.TRANSFER_SUBCLASS) - {
 
 def parse_wechat(wb) -> list[RawFlow]:
     ws = wb.active
-    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    rows = [list(r) for r in _capped(ws.iter_rows(values_only=True))]
     h = _find_header(rows, "交易时间")
     if h < 0:
         raise ValueError("未找到微信表头（交易时间）")
@@ -227,7 +239,7 @@ def parse_wechat(wb) -> list[RawFlow]:
     return out
 
 def parse_jd(text: str) -> list[RawFlow]:
-    rows = list(csv.reader(io.StringIO(text)))
+    rows = list(_capped(csv.reader(io.StringIO(text))))
     h = _find_header(rows, "交易时间")
     if h < 0:
         raise ValueError("未找到京东表头（交易时间）")
@@ -311,7 +323,7 @@ def parse_app_export(text: str) -> list[RawFlow]:
     """本应用导出格式。导出回环三件套：
     收款账户列（转账对方，旧版两账户 & 拼接自动拆）、订单号/来源列原样还原、
     流水ID/退款关联列——退款对按 ID 批内直连，无需重新匹配。"""
-    rows = list(csv.reader(io.StringIO(text)))
+    rows = list(_capped(csv.reader(io.StringIO(text))))
     h = _find_header(rows, "交易时间")
     if h < 0:
         h = 0
@@ -365,7 +377,7 @@ def parse_bill(data: bytes, filename: str) -> list[RawFlow]:
             import csv as _csv
             buf = io.StringIO()
             w = _csv.writer(buf)
-            for row in wb.active.iter_rows(values_only=True):
+            for row in _capped(wb.active.iter_rows(values_only=True)):
                 w.writerow(["" if v is None else v for v in row])
             return parse_app_export(buf.getvalue())
         raise ValueError("无法识别 xlsx 表头（支持：微信账单 / 本应用导出）")
