@@ -11,7 +11,7 @@ source=thirdparty
 install_dep_apps=python312
 
 maintainer=liulu
-maintainer_url=
+maintainer_url=https://github.com/liuluuuuu/lulu-ledger
 distributor=山归山
 distributor_url=
 
