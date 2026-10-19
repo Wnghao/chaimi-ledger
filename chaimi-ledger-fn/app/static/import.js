@@ -13,19 +13,21 @@ function impOnPick(input){
   if(f){ btn.classList.add("has-file"); name.textContent = f.name; }
   else { btn.classList.remove("has-file"); name.textContent = "未选择文件"; }
 }
-async function impParse(){
-  const f = $("#imp_file").files[0]; if(!f) return msg("请选择文件", false);
+async function impParse(tpl){   // tpl=向导试解析的自定义模板；缺省=常规解析（未识别时进向导）
+  const f = tpl ? wizFile : $("#imp_file").files[0];
+  if(!f){ if(!tpl) msg("请选择文件", false); return; }
   let useAi = $("#imp_ai").checked;
   if(useAi && !(await aiConfigured())){
-    msg("未配置 AI：请到设置页填写 LLM API Key，本次按未启用 AI 解析", false);
+    if(!tpl) msg("未配置 AI：请到设置页填写 LLM API Key，本次按未启用 AI 解析", false);   // 向导路径静默降级
     useAi = false;
   }
   const fd = new FormData(); fd.append("file", f);
-  $("#imp_summary").textContent = "解析中…" + (useAi ? "（AI 兜底可能较慢）" : "");
+  if(tpl) fd.append("template", JSON.stringify(tpl));
+  $("#imp_summary").textContent = (tpl ? "按模板" : "") + "解析中…" + (!tpl && useAi ? "（AI 兜底可能较慢）" : "");
   try{
     const r = await api(`/api/import/parse?ledger=${lid()}&use_ai=${useAi}`, {method:"POST", body:fd});
     impPreviews = r.previews;
-    impMeta = {filename:r.filename, source:r.previews.find(p=>p.source)?.source||"manual"};
+    impMeta = {filename:r.filename, source:r.previews.find(p=>p.source)?.source || (tpl ? "custom" : "manual")};
     await loadAccs();   // 解析期可能自动建了银行卡账户，同步账户列表供编辑弹窗/记一笔使用
     $("#imp_summary").innerHTML = impSummaryHtml(r);
     document.querySelector("#pv_summary").innerHTML = $("#imp_summary").innerHTML;
@@ -33,7 +35,7 @@ async function impParse(){
     openPv();
   }catch(e){
     $("#imp_summary").textContent="";
-    if(e.message.includes("无法识别")){ msg("未识别的格式——进入模板向导", true, "info"); wizStart(f); }
+    if(!tpl && e.message.includes("无法识别")){ msg("未识别的格式——进入模板向导", true, "info"); wizStart(f); }
     else msg(e.message, false);
   }
 }
@@ -86,7 +88,7 @@ function wizValidate(t){
 async function wizTry(){
   const t = wizCollect(); const err = wizValidate(t);
   if(err) return msg(err, false);
-  await impParseWithTemplate(t);   // 向导保持打开：预览叠于其上，可回来调整再试
+  await impParse(t);   // 向导保持打开：预览叠于其上，可回来调整再试
 }
 async function wizSave(){
   const t = wizCollect(); const err = wizValidate(t);
@@ -96,22 +98,6 @@ async function wizSave(){
   msg("模板已保存，今后同格式文件自动识别 ✅");
   wizClose(); loadTpls();
   impParse();   // 保存后立即按常规流程重解析：自动分流会命中刚存的模板
-}
-async function impParseWithTemplate(t){
-  const f = wizFile; if(!f) return;
-  let useAi = $("#imp_ai").checked;
-  if(useAi && !(await aiConfigured())) useAi = false;
-  const fd = new FormData(); fd.append("file", f); fd.append("template", JSON.stringify(t));
-  $("#imp_summary").textContent = "按模板解析中…";
-  try{
-    const r = await api(`/api/import/parse?ledger=${lid()}&use_ai=${useAi}`, {method:"POST", body:fd});
-    impPreviews = r.previews;
-    impMeta = {filename:r.filename, source:r.previews.find(p=>p.source)?.source||"custom"};
-    await loadAccs();
-    $("#imp_summary").innerHTML = impSummaryHtml(r);
-    document.querySelector("#pv_summary").innerHTML = $("#imp_summary").innerHTML;
-    renderPv(); openPv();
-  }catch(e){ $("#imp_summary").textContent=""; msg(e.message, false); }
 }
 async function loadTpls(){
   try{

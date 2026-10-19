@@ -138,6 +138,7 @@ async function getCfg(force){
   _cfgCache = await api("/api/config");
   return _cfgCache;
 }
+const curLedger = () => getLedgers().then(ls => ls.find(l => l.id === lid()));   // 当前账本对象（预算/币种/导出文件名共用）
 function toggleSidebar(){
   const open = $("#sidebar").classList.toggle("open");
   // 判定抽屉态、JS 却判桌面态），遮罩/推挤与菜单项自动收起会在平板上失灵
@@ -332,7 +333,8 @@ async function loadAttrs(){
       api(`/api/attribution-groups?ledger=${lid()}`)
     ]);
     setAttrState(ats, gs);
-  }catch(_){ attributions = []; attrGroupNames = []; raw2group = {}; }
+    return [ats, gs];   // 原始名单返回：设置页 stAttrs 渲染表格复用（拉取/解析单源）
+  }catch(_){ attributions = []; attrGroupNames = []; raw2group = {}; return [[], []]; }
 }
 async function txItemAddAttr(btn){   // 条目卡内新建用户并选中（与「＋新建」分类同款交互）
   const name = await uiPrompt("新建用户名：");

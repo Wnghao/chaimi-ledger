@@ -54,7 +54,7 @@ async function llmModelsOpen(){
   const b=$("#llmModelsBody");
   b.innerHTML='<div class="sub" style="padding:6px 0">获取中…</div>';
   let d; try{ d=await api("/api/llm/models"); }
-  catch(e){ b.innerHTML=`<div class="sub">获取失败: ${esc(e)}</div>`; return; }
+  catch(e){ b.innerHTML=`<div class="sub">获取失败: ${esc(e.message)}</div>`; return; }
   if(d.error&&!d.text.length&&!d.vision.length){ b.innerHTML=`<div class="sub">${esc(d.error)}</div>`; return; }
   // 模型名来自外部 LLM 服务商的 /models 接口（不可信输入）：文本与 onclick 一律转义
   const grp=(t,arr,fill)=>`<label style="display:block;margin-top:10px">${t} <span class="sub" style="font-size:11px">点击选用</span></label>`+
@@ -214,29 +214,30 @@ async function stAccs(){
     '<tr><td colspan="3" class="sub">暂无账户</td></tr>';
   $("#accTotal").textContent = `${r.label}消费合计 ${curSym()}${fmt(as.reduce((s, a) => s + (a.spend || 0), 0))}`;
   // 避免与账户维度的 spend 合计因口径差异对不上；「全部」范围无该字段时回落账户合计
-  const cur = (await getLedgers()).find(l => l.id === lid());
+  const cur = await curLedger();
   if(cur && cur.budget && $("#bdg_amt").value === "") $("#bdg_amt").value = (cur.budget / 100).toFixed(2);
   const spend = as[0] && as[0].net_expense !== undefined ? as[0].net_expense
     : as.reduce((s, a) => s + (a.spend || 0), 0);
   if(cur && cur.budget && r.months){
     const budget = cur.budget * r.months;
     const pct = Math.round(spend / budget * 100);
-    $("#bdg_stat").innerHTML = `${r.label}已消费 <b style="color:${pct > 100 ? "var(--expense)" : "var(--fg)"}">${curSym()}${fmt(spend)}</b> / 预算 ${curSym()}${fmt(budget)}（${pct}%${pct > 100 ? " 超支" : ""}）`;
+    const bLabel = r.months > 1 ? `预算(月预算×${r.months})` : "预算";   // 年范围折算值,标明口径防误读为未生效
+    $("#bdg_stat").innerHTML = `${r.label}已消费 <b style="color:${pct > 100 ? "var(--expense)" : "var(--fg)"}">${curSym()}${fmt(spend)}</b> / ${bLabel} ${curSym()}${fmt(budget)}（${pct}%${pct > 100 ? " 超支" : ""}）`;
   }else{
     $("#bdg_stat").innerHTML = `${r.label}消费合计 <b>${curSym()}${fmt(spend)}</b>${cur && cur.budget ? "（「全部」范围不按预算折算）" : ""}`;
   }
 }
 async function saveBudget(){
-  const cur = (await getLedgers()).find(l => l.id === lid());
+  const cur = await curLedger();
   if(!cur) return;
   await apiSend(`/api/ledgers/${lid()}`, "PUT", {name: cur.name, icon: cur.icon || "", currency: cur.currency || "CNY",
     budget: Math.round(parseFloat($("#bdg_amt").value || "0") * 100)});
+  await getLedgers(true);   // 强刷缓存：不刷则 stAccs 仍读到旧预算,统计行不更新
   msg("预算已保存 ✅"); stAccs();
 }
 const userEdit = mkEditToggle("userEditBtn", () => stAttrs());
-async function stAttrs(){   // 用户设置：用户 + 原始归属名单一次并行拉取；setAttrState 顺带同步下拉与当前用户
-  const [ats,gs]=await Promise.all([api(`/api/attributions?ledger=${lid()}`),api(`/api/attribution-groups?ledger=${lid()}`)]);
-  setAttrState(ats,gs);
+async function stAttrs(){   // 用户设置：拉取与状态解析走 loadAttrs 单源，此处只渲染两张表
+  const [ats,gs]=await loadAttrs();
   const avHtml=g=>`<img src="${avatarUrl(g.avatar)}" style="width:30px;height:30px;border-radius:9px;vertical-align:middle">`;
   document.querySelector("#attrGroupTable tbody").innerHTML=gs.map(g=>
     `<tr>
@@ -351,7 +352,7 @@ async function restore(f){
   if(!await uiConfirm("恢复将覆盖当前全部数据，确定？", "恢复"))return;
   await apiSend("/api/restore","POST",{file:f});
   _cfgCache = null;   // 恢复会替换 chaimi.conf：配置缓存必须失效
-  msg("已恢复 ✅");loadAll();loadCfg();loadBkCfg();
+  msg("已恢复 ✅");loadAll();loadCfg();loadBkCfg();loadBotCfg();
 }
 
 let _ilinkTimer = null, _qrTimer = null;
@@ -492,6 +493,7 @@ async function botPoll(loop){
 async function botUnbind(aid){
   if(!await uiConfirm("解绑后该成员的微信机器人将停止记账，确定？", "解绑"))return;
   await apiSend("/api/bot/ilink/unbind","POST",{account_id:aid});
+  _cfgCache = null;   // 解绑改写 chaimi.conf(ilink 凭证)：配置缓存随之失效
   msg("已解绑"); await botMembers();
 }
 function copyText(t){   // execCommand 兜底通吃 http/https,免去 clipboard API 双路径
@@ -509,6 +511,7 @@ function copyMcpCfg(){
 async function genBotToken(){
   if($("#bot_token").value && !await uiConfirm("重置后旧 Token 立即失效，网关侧需同步更换。确定重置？","重置"))return;
   const r = await api("/api/bot/token",{method:"POST"});
+  _cfgCache = null;   // token 已落 chaimi.conf：缓存不失效则重进设置页回显旧的「未生成」
   $("#bot_token").value = r.token;
   _botTokenPlain = r.token;   // MCP 配置行同步填入明文，「复制」即得完整可用配置
   $("#bot_mcp_cfg").textContent = botMcpCfgText();

@@ -24,10 +24,6 @@ body{display:flex;align-items:center;justify-content:center;background:var(--bg)
   background:var(--card);padding:0 14px;font-size:16px;color:var(--fg);outline:none;font-family:inherit}
 .lg-input:focus{border-color:var(--primary)}
 .lg-input.lg-err{border-color:var(--m-peach)}
-.lg-chips{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.lg-chips button{border:none;background:var(--chip);color:var(--fg);border-radius:var(--radius-pill);
-  padding:7px 16px;font-size:13px;cursor:pointer;font-family:inherit}
-.lg-chips button:hover{background:var(--hover)}
 .lg-avatars{display:flex;gap:12px;margin-top:10px}
 .lg-avpick{width:64px;height:64px;border-radius:18px;border:2px solid transparent;background:var(--card);
   cursor:pointer;padding:3px;box-shadow:var(--shadow);font-family:inherit}
@@ -160,9 +156,6 @@ function setupHtml(fromList){   // 状态 A：设置用户名（必填）+ 头�
     </div>
     <div class="lg-label"><span>用户名</span>${fromList ? "" : '<span class="lg-req">必填</span>'}</div>
     <input id="lg_name" class="lg-input" placeholder="如：老公 / 老婆 / 我" oninput="this.classList.remove('lg-err')">
-    <div class="lg-chips">
-      <button onclick="fill('我')">我</button><button onclick="fill('老公')">老公</button><button onclick="fill('老婆')">老婆</button>
-    </div>
     <button class="lg-go" onclick="create()">开始记账 →</button>
     <div class="lg-foot">头像可稍后在「设置 → 用户设置」里更换</div>`;
 }
@@ -191,7 +184,6 @@ function selHtml(){   // 状态 B：选择用户（上次使用的排最前并�
     </div>
     <div class="lg-foot" style="margin-top:18px">选择后记住在本设备，下次直接进入记账页</div>`;
 }
-const fill = v => { const el = $("#lg_name"); el.value = v; el.classList.remove("lg-err"); };
 const back = () => render(selHtml());
 const newUser = () => render(setupHtml(true));
 function enter(id){

@@ -218,24 +218,24 @@ def home():
     """登录/用户选择页：主应用检测到无当前用户（首次/缓存失效）时跳转至此。"""
     return _page("home.html")
 
-@app.get("/static/{name}", include_in_schema=False)
-def static_file(name: str):
-    _safe_name(name)   # 与 /images /receipts 对称的纵深防护（路径穿越不可利用但保持一致）
-    p = _STATIC / name
+def _no_cache_file(base: Path, name: str) -> FileResponse:
+    """目录内文件下发（/static 与 /images 共用）：名校验 + 404 + 禁缓存。"""
+    _safe_name(name)   # 与 /receipts 对称的纵深防护（路径穿越不可利用但保持一致）
+    p = base / name
     if not p.is_file():
         raise HTTPException(404)
-    # 单文件应用拆分后避免升级后浏览器沿用旧 CSS/JS：与 _page 一致禁缓存
     return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+@app.get("/static/{name}", include_in_schema=False)
+def static_file(name: str):
+    # 单文件应用拆分后避免升级后浏览器沿用旧 CSS/JS：与 _page 一致禁缓存
+    return _no_cache_file(_STATIC, name)
 
 @app.get("/images/{name}", include_in_schema=False)
 def app_image(name: str):
     """应用图片：app/server/images 目录。
     禁缓存——后期直接替换同名文件（如换新头像）刷新即生效，无需改代码。"""
-    _safe_name(name)
-    p = _IMAGES / name
-    if not p.is_file():
-        raise HTTPException(404)
-    return FileResponse(p, headers={"Cache-Control": "no-cache"})
+    return _no_cache_file(_IMAGES, name)
 
 @app.get("/healthz")
 def healthz():
@@ -905,11 +905,6 @@ def stats_renqing(ledger: int):
 MAX_UPLOAD = 20 * 1024 * 1024
 ALLOWED_EXT = (".csv", ".xlsx")
 
-def _upload_text(filename: str | None, data: bytes) -> str:
-    """上传文件 → CSV 文本（xlsx 首表转换 / CSV 解码）：模板试解析与向导嗅探共用。"""
-    return (ib._xlsx_to_csv(data) if (filename or "").lower().endswith(".xlsx")
-            else ib._decode_csv(data))
-
 def _upload_guard(filename: str | None, data: bytes) -> None:
     """导入上传安全闸（防恶意文件）：扩展名白名单 + 大小上限 + xlsx 魔数校验。
     行数熔断由 import_bill._capped（解析期）与本函数调用后的 len 校验（权威上限）接力。"""
@@ -933,7 +928,7 @@ async def import_parse(ledger: int, file: UploadFile = File(...), use_ai: bool =
             tpl = json.loads(template)
             if not (isinstance(tpl, dict) and tpl.get("headers") and tpl.get("col")):
                 raise ValueError("模板格式不完整")
-            text = _upload_text(file.filename, data)
+            text = ib.text_from_upload(data, file.filename)
             flows = ib.parse_generic(text, tpl)
         else:
             flows = ib.parse_bill(data, file.filename)
@@ -993,7 +988,7 @@ async def import_sniff(file: UploadFile = File(...)):
     """向导嗅探：表头定位 + 样例 + 列映射猜测（"无法识别"的文件从这里进入模板向导）。"""
     data = await file.read()
     _upload_guard(file.filename, data)
-    text = _upload_text(file.filename, data)
+    text = ib.text_from_upload(data, file.filename)
     return ib.sniff_template(text)
 
 _TPL_FIELDS = ("date", "type", "name", "flow", "pay", "amount", "order", "merchant", "note")
@@ -1271,6 +1266,9 @@ def _backup_call(op, name: str) -> None:
 def do_restore(body: dict):
     _backup_call(backup.restore_backup, body.get("file", ""))
     dbm.init_db()
+    # chaimi.conf 随备份回滚：sidecar(18710)/直连轮询线程必须按新模式差量对齐，
+    # 否则旧 gateway 的监听会残留（off 后端口仍开），或恢复 gateway 却不开
+    _bot_apply()
     return {"ok": True}
 
 @app.post("/api/backups/delete")

@@ -8,7 +8,6 @@
   --border:#E8EBF3;      /* 通用边框 */
   --chip:#F1F3F8;        /* 标签/小元素底 */
   --hover:#F4F6FB;       /* hover 高亮 */
-  --hover-2:#EFF2F8;     /* 较强 hover */
   --mask:rgba(31,36,51,.45);   /* 弹窗遮罩（modal-mask 与退款下拉共用） */
   --sb-thumb:rgba(31,36,51,.25);        /* 滚动条滑块（悬浮式，仅 hover 提亮） */
   --sb-thumb-hover:rgba(31,36,51,.45);
@@ -47,21 +46,16 @@
 
   /* ===== 固定语义色（收支/待确认——保留对比度，不参与色系轮换）===== */
   --expense:#D0404F;
-  --expense-bg:#FDEBEC;
   --income:#23855A;
-  --income-bg:#E8F6EE;
   --pending:#E8B845;       /* 待确认——暖黄 */
   --pending-bg:#FDF6E0;
   --transfer:#787A88;      /* 转账——莫兰迪灰 */
-  --neutral:#A0A4B0;
-  --neutral-bg:#EEEEF1;
 
   /* ===== 日历热力（薄荷蓝绿 4 档，与 cal 图标 #5DBF8A 同源，4 档 lightness 阶梯） ===== */
   --cal-heat-1:#E6F4EE;        /* 极淡薄荷（最低支出，与 cal 图标同源） */
   --cal-heat-2:#C8E5DA;        /* 淡薄荷（低支出） */
   --cal-heat-3:#9BD0BC;        /* 中薄荷（中支出） */
   --cal-heat-4:#5DBF8A;        /* 主薄荷绿（最高支出，= cal 图标色） */
-  --cal-inc-bg:#EAF4F8;        /* 收入日专用底色（极淡天蓝，区分收支视觉） */
 
   --cal-amt-e1:#D0404F; --cal-amt-i1:#23855A;
   --cal-amt-e2:#A32A38; --cal-amt-i2:#14603C;
@@ -69,7 +63,7 @@
 }
 [data-theme="dark"]{
   --bg:#0F172A; --bg-2:#1E293B; --card:#1A2236; --fg:#E8ECF4; --muted:#8A93A8;
-  --border:rgba(255,255,255,.04); --hover:rgba(255,255,255,.05); --hover-2:rgba(255,255,255,.09);
+  --border:rgba(255,255,255,.04); --hover:rgba(255,255,255,.05);
   --chip:#252C40; --pending-bg:rgba(217,162,80,.16);
   /* 滚动条：深底上用低透明度白，弱化存在感，hover 才提亮 */
   --sb-thumb:rgba(255,255,255,.16); --sb-thumb-hover:rgba(255,255,255,.32);
@@ -90,15 +84,13 @@
   --m-butter-50:#34291A;  --m-butter-100:#4D3D24; --m-butter-bd:#B58F38;  --m-butter:#D9B040;  --m-butter-fg:#E5C870;
   --primary:var(--m-blue); --primary-2:var(--m-blue-bd); --primary-bg:var(--m-blue-100); --primary-fg:var(--m-blue-fg);
   /* 语义色：深色模式适度调暗避免刺眼，但仍需可辨识 */
-  --expense:#E87585; --expense-bg:rgba(232,117,133,.16);
-  --income:#7ACFA0; --income-bg:rgba(122,207,160,.16);
-  --neutral:#8E93A2; --neutral-bg:rgba(142,147,162,.16);
+  --expense:#E87585;
+  --income:#7ACFA0;
   /* 日历热力：深色模式薄荷蓝绿 4 档（与 cal 图标同源） */
   --cal-heat-1:#1E3A2E;        /* 极深薄荷（最低支出） */
   --cal-heat-2:#2E5042;        /* 深薄荷（低支出） */
   --cal-heat-3:#46755E;        /* 中薄荷（中支出） */
   --cal-heat-4:#6FCBA0;        /* 亮薄荷绿（最高支出，深底跳出来） */
-  --cal-inc-bg:#1E3848;        /* 收入日专用底色（深蓝灰） */
   /* 日历金额字色（深色：h1·h2 深底用亮色原色；h3 中等亮度底提亮；h4 亮薄荷底反转为深字） */
   --cal-amt-e1:#E87585; --cal-amt-i1:#7ACFA0;
   --cal-amt-e2:#FFC9D0; --cal-amt-i2:#B9F0D2;

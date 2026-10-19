@@ -22,7 +22,7 @@ from datetime import datetime
 
 import db as dbm
 import platform_templates as pt
-from import_common import _is_placeholder_name, is_meaningless_name, normalize
+from import_common import _is_new_row, _is_placeholder_name, is_meaningless_name, normalize
 from import_classify import (_top_by_keyword,
                              _purge_bad_learned_mappings, auto_fix_transactions,
                              ClassifyCtx, classify_transfer, classify_flow)
@@ -434,10 +434,15 @@ def _xlsx_to_csv(data: bytes) -> str:
         w.writerow(["" if v is None else v for v in row])
     return buf.getvalue()
 
+def text_from_upload(data: bytes, filename: str) -> str:
+    """上传字节 → CSV 文本：xlsx 首表转换 / 其余按 CSV 解码（server 上传口与 parse_bill 共用单源）。"""
+    return (_xlsx_to_csv(data) if (filename or "").lower().endswith(".xlsx")
+            else _decode_csv(data))
+
 def parse_bill(data: bytes, filename: str) -> list[RawFlow]:
     """统一路由：xlsx→行 / CSV 解码后，用户模板优先、内置模板次之，表头集合命中即解析。
     覆盖机制：用户复制的模板排在前面，改列名后即接管该格式的路由。"""
-    text = (_xlsx_to_csv(data) if filename.lower().endswith(".xlsx") else _decode_csv(data))
+    text = text_from_upload(data, filename)
     rows = list(_capped(csv.reader(io.StringIO(text))))
     for tpl in [*user_templates(), *pt.PLATFORM_TEMPLATES]:
         if _tpl_header_hit(rows, tpl) >= 0:

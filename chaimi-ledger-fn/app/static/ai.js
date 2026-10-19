@@ -160,6 +160,14 @@ function pvCatOptions(cur){
   return normal.map(c=>`<option value="${c.id}" ${c.name===cur?"selected":""}>${esc(c.name)}</option>`).join("")
     + (tHtml ? `<optgroup label="退款和不计收支">${tHtml}</optgroup>` : "");
 }
+function confTags(t){   // 待确认/退款置信标签组（单行卡与双行退款卡的退款行共用）
+  const ts = [];
+  if(t.need_confirm) ts.push('<span class="tag warn">待确认</span>');
+  const rc = t.refund_confidence;
+  if(rc === "high" || rc === "low") ts.push(`<span class="tag refund-${rc}">退款</span>`);
+  else if(rc === "unmatched") ts.push('<span class="tag refund-unmatched">退回</span>');
+  return ts;
+}
 function txRow(t, mode){
   // 字段显示与 flow 完全一致；仅 4 处预览态差异：
   //   1) duplicate 标签 + 透明度（仅 preview：提示已被导入过）
@@ -182,10 +190,7 @@ function txRow(t, mode){
   }
   else if(pv && t.skip && t._pvSkip) tags.push(`<button class="tag dup-hint" onclick="impSkipRow(${t._pvIdx})">已跳过 · 点此恢复</button>`);
   else if(pv && t.dup_hint) tags.push(`<button class="tag dup-hint" title="${esc(dupHintText(t.dup_hint))}" onclick="impSkipRow(${t._pvIdx})">疑似重复 点击跳过</button>`);
-  if(t.need_confirm) tags.push('<span class="tag warn">待确认</span>');
-  if(t.refund_confidence === "high") tags.push('<span class="tag refund-high">退款</span>');
-  else if(t.refund_confidence === "low") tags.push('<span class="tag refund-low">退款</span>');
-  else if(t.refund_confidence === "unmatched") tags.push('<span class="tag refund-unmatched">退回</span>');
+  tags.push(...confTags(t));
   const srcTag = t.source && t.source!=="manual" ? `<span class="tag plain tx-src">${t.source}</span>` : "";
   const rcpTag = t.receipt_path ? `<span class="tag plain tx-src" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>` : "";
   // 源栈：jd 在上、小票在下；只有其中一个时单独显示
@@ -237,11 +242,7 @@ function txRow(t, mode){
   // 第二行 onclick 调 openEdit(ro.id) 时取不到数据会静默 return → 看起来"第二行点不动"。
   // 这里在渲染双行卡时把原交易一并缓存，第二行即可正常打开编辑。
   txCache[ro.id] = ro;
-  const refundTags = [];
-  if(t.need_confirm) refundTags.push('<span class="tag warn">待确认</span>');
-  if(t.refund_confidence === "high") refundTags.push('<span class="tag refund-high">退款</span>');
-  else if(t.refund_confidence === "low") refundTags.push('<span class="tag refund-low">退款</span>');
-  else if(t.refund_confidence === "unmatched") refundTags.push('<span class="tag refund-unmatched">退回</span>');
+  const refundTags = confTags(t);
   if(t.receipt_path) refundTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>`);
   const roTags = [];
   if(ro.receipt_path) roTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(ro.receipt_path)}')">🧾</span>`);

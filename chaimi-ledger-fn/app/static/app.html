@@ -650,7 +650,16 @@
     </div>
     <div class="modal-body">
       <div id="pv_summary" class="sub" style="margin-bottom:6px"></div>
-      <div class="sub" style="margin-bottom:10px">标签：待确认＝低置信稍后处理 · 已导入＝重复将跳过 · 疑似重复＝同日同额，点击跳过 · 跨源/手动重复＝已在其他账单或手动记过（置顶，点击可导入） · 退款＝已关联原消费 · 退回＝未找到原消费；悬停行可看分类依据</div>
+      <div class="sub" style="margin-bottom:10px;line-height:2.1">
+        <span style="display:inline-block;margin:0 14px 2px 0;white-space:nowrap"><span class="tag warn" style="margin-left:0">待确认</span> 需人工核对（分类兜底/人情复核/退款存疑，改分类即消）</span>
+        <span style="display:inline-block;margin:0 14px 2px 0"><span class="tag dup" style="margin-left:0">已导入</span> 重复，将跳过</span>
+        <span style="display:inline-block;margin:0 14px 2px 0"><span class="tag dup-hint" style="margin-left:0;cursor:default">疑似重复</span> 同日同额同类型，点击跳过</span>
+        <span style="display:inline-block;margin:0 14px 2px 0"><span class="tag dup-hint" style="margin-left:0;cursor:default">跨源/手动重复</span> 已在其他账单或手动记过，置顶默认跳过、点标签导入</span>
+        <span style="display:inline-block;margin:0 14px 2px 0"><span class="tag refund-high" style="margin-left:0">退款</span> 已关联原消费</span>
+        <span style="display:inline-block;margin:0 14px 2px 0"><span class="tag refund-low" style="margin-left:0">退款</span> 低置信关联，另标待确认</span>
+        <span style="display:inline-block;margin:0 14px 2px 0"><span class="tag refund-unmatched" style="margin-left:0">退回</span> 未找到原消费，另标待确认</span>
+        悬停行可看分类依据
+      </div>
       <div id="pv_body" class="pv-list"></div>
     </div>
     <div class="modal-foot">

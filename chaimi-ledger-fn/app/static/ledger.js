@@ -122,7 +122,7 @@ async function exportReceipts(){
     }
     const blob = await r.blob();
     // 文件名：chaimi-ledger-账本名小票-日期.zip（账本名去掉图标前缀）
-    const lg = (await getLedgers()).find(l => l.id === lid());
+    const lg = await curLedger();
     const t = new Date();
     const stamp = `${t.getFullYear()}${pad2(t.getMonth()+1)}${pad2(t.getDate())}`;
     const a = document.createElement("a");

@@ -11,10 +11,8 @@
 .attr-b-half.left{justify-content:flex-end}
 .attr-b-bar{height:20px;border-radius:4px;display:flex;align-items:center;padding:0 6px;font-size:10px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;min-width:24px;cursor:pointer;transition:opacity .15s}
 .attr-b-bar:hover{opacity:.8}
-.attr-b-bar.exp{background:#6CB0F5}
-.attr-b-bar.inc{background:#6FD5A0}
-[data-theme="dark"] .attr-b-bar.exp{background:#3E72A8}
-[data-theme="dark"] .attr-b-bar.inc{background:#42A06C}
+.attr-b-bar.exp{background:var(--expense)}
+.attr-b-bar.inc{background:var(--income)}
 .attr-b-center{width:60px;text-align:center;font-size:13px;font-weight:600;flex-shrink:0;cursor:pointer}
 .attr-b-center:hover{color:var(--primary)}
 
@@ -425,7 +423,6 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 .cm-cname.edit{cursor:pointer;color:var(--primary);text-decoration:underline dotted}
 .cm-chips{flex:1 1 auto;min-width:0;display:flex;flex-wrap:wrap;gap:2px 4px;align-items:center;justify-content:flex-end}
 .mchip b:hover{color:var(--expense)}
-.mchip.tgt{background:var(--primary);color:#fff;border-color:var(--primary)}
 .st-sec .btn.danger{border:1px solid var(--expense);color:var(--expense);background:none;padding:4px 10px;font-size:12px}
 @media(max-width:768px){ .st-head h1{display:none} }
 

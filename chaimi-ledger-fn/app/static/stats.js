@@ -208,16 +208,10 @@ function gbarFit(){
 async function loadSumbarList(){
   if(!document.getElementById("gsum")) return;
   try{
-    const sc = appScope();
-    let s, range;
-    if(sc === "month"){
-      const m = dtGet($("#monthSel")) || thisMonth();
-      range = curStatRange();
-      s = await api(`/api/stats/summary?ledger=${lid()}&month=${m}`);
-    }else{
-      range = curStatRange();
-      s = await api(`/api/stats/range?ledger=${lid()}&from=${range.from}&to=${encodeURIComponent(rangeDto(range))}`);
-    }
+    const range = curStatRange();
+    const s = appScope() === "month"
+      ? await api(`/api/stats/summary?ledger=${lid()}&month=${dtGet($("#monthSel")) || thisMonth()}`)
+      : await api(`/api/stats/range?ledger=${lid()}&from=${range.from}&to=${encodeURIComponent(rangeDto(range))}`);
     renderSumbar("list", s, range);
   }catch(_){}
 }
@@ -331,17 +325,18 @@ async function refreshStats(){
   }catch(_){}
   $("#attrCard").style.display = attrs.length ? "" : "none";
   if(attrs.length){
-    // 蝴蝶图：中心人名，左=支出右=收入；金额在条外（支出左侧/收入右侧）；色值与饼图调色板一致
+    // 蝴蝶图：中心人名，左=支出右=收入；金额在条外（支出左侧/收入右侧）；条色走 CSS 语义色（views.css --expense/--income）
     const maxAmt = Math.max(...attrs.map(a => Math.max(a.expense || 0, a.income || 0)), 1);
     const barW = v => Math.max(2, (v / maxAmt) * 100);
     const amtLabel = v => v > 0 ? `<span class="sub" style="font-size:10px;flex-shrink:0;margin:0 6px">${fmt(v)}</span>` : "<span style='width:8px'></span>";
+    const barClick = (a, dir, type) => `showTxDetail('${qEsc(a.person)} ${dir}明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'${type}',attribution:'${qEsc(a.person)}'})`;
     $("#attrButterfly").innerHTML =
       `<div class="attr-b-axis"><span class="l">← 支出</span><span class="c"></span><span class="r">收入 →</span></div>` +
       attrs.map((a, i) => `
         <div class="attr-b-row">
-          <div class="attr-b-half left">${amtLabel(a.expense)}<div class="attr-b-bar exp" style="width:${barW(a.expense)}%" onclick="showTxDetail('${qEsc(a.person)} 支出明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'expense',attribution:'${qEsc(a.person)}'})"></div></div>
+          <div class="attr-b-half left">${amtLabel(a.expense)}<div class="attr-b-bar exp" style="width:${barW(a.expense)}%" onclick="${barClick(a, "支出", "expense")}"></div></div>
           <div class="attr-b-center" onclick="attrDetailToggle(${i})">${esc(a.person)}</div>
-          <div class="attr-b-half"><div class="attr-b-bar inc" style="width:${barW(a.income)}%" onclick="showTxDetail('${qEsc(a.person)} 收入明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'income',attribution:'${qEsc(a.person)}'})"></div>${amtLabel(a.income)}</div>
+          <div class="attr-b-half"><div class="attr-b-bar inc" style="width:${barW(a.income)}%" onclick="${barClick(a, "收入", "income")}"></div>${amtLabel(a.income)}</div>
         </div>`).join("");
 
     // 下方保留可展开列表（分组/成员明细）
