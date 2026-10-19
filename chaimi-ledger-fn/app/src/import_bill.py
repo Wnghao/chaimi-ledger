@@ -22,7 +22,7 @@ from datetime import datetime
 
 import db as dbm
 import platform_templates as pt
-from import_common import _is_new_row, _is_placeholder_name, is_meaningless_name, normalize
+from import_common import _is_placeholder_name, is_meaningless_name, normalize
 from import_classify import (_top_by_keyword,
                              _purge_bad_learned_mappings, auto_fix_transactions,
                              ClassifyCtx, classify_transfer, classify_flow)

@@ -521,7 +521,7 @@ _RENQING_CAT_SQL = ("t.category_id IN (SELECT id FROM categories "
 def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str = "", type: str = "",
                       category: int = 0, need_confirm: bool = False, q: str = "",
                       renqing_name: str = "", attribution: str = "",
-                      to_exclusive: bool = False,
+                      to_exclusive: bool = False, with_refunds: bool = False,
                       page: int = 1, page_size: int = 50):
     sql = ["SELECT t.*, c.name AS category_name, a.name AS account_name, "
            "ro.id AS ro_id, ro.date AS ro_date, ro.name AS ro_name, ro.note AS ro_note, "
@@ -564,8 +564,14 @@ def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str
         sql.append(frag)
         args += params
     if type:
-        sql.append("AND t.type=?")
-        args.append(type)
+        if with_refunds and type == "expense":
+            # 汇总条「支出」为净额(毛−退款)：明细须带退款行（关联后 type=transfer，
+            # 前端渲染退款双卡片）才能与条上数字对账；未关联退款仍是收入行不计入
+            sql.append("AND (t.type=? OR t.refund_for IS NOT NULL)")
+            args.append(type)
+        else:
+            sql.append("AND t.type=?")
+            args.append(type)
     if category:
         # （退款行 type=transfer 且 category_id 常不落本分类，不连带取会丢失退款双卡片）
         cat_sql = "SELECT id FROM categories WHERE ledger_id=? AND (id=? OR parent_id=?)"

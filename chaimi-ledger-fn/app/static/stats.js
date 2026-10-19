@@ -231,7 +231,8 @@ function sumbarDetail(page, kind){
   const name = {income:"收入", net:"支出", balance:"收支"}[kind] || "收支";
   const type = kind==="income" ? "income" : kind==="balance" ? "" : "expense";
   showTxDetail(`${sbLabel(r)} ${name}明细`,
-    {from:r.from, to:r.to, toExclusive:excl, ...(type?{type}:{})});
+    {from:r.from, to:r.to, toExclusive:excl, ...(type?{type}:{}),
+     ...(kind==="net" ? {with_refunds:true} : {})});   // 支出=净额(毛−退款)，明细带退款行对账
 }
 async function refreshStats(){
   const sc = appScope();
