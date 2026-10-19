@@ -1,0 +1,31 @@
+[
+    {
+        "stepTitle": "确认卸载",
+        "items": [
+            {
+                "type": "tips",
+                "helpText": "您即将卸载「柴米记账」。请选择如何处理应用日志数据："
+            },
+            {
+                "type": "radio",
+                "field": "remove_logs",
+                "label": "数据保留选项",
+                "initValue": "delete",
+                "options": [
+                    {
+                        "label": "保留日志数据（推荐）- 应用如有异常可根据日志信息排查问题",
+                        "value": "keep"
+                    },
+                    {
+                        "label": "删除日志数据（默认）- 此操作不可恢复！不需要保留日志数据",
+                        "value": "delete"
+                    }
+                ]
+            },
+            {
+                "type": "tips",
+                "helpText": "<strong>说明：</strong>账本数据库（chaimi.db）与备份不受卸载影响；配置（AI API Key 等）默认保留，重装后可直接沿用。如需彻底清空，请先在设置页备份并下载数据。"
+            }
+        ]
+    }
+]

@@ -1,4 +1,4 @@
-"""测试公共基类：每个用例独立临时目录（LULU_DB/LULU_CONF 指过去），互不污染。
+"""测试公共基类：每个用例独立临时目录（CHAIMI_DB/CHAIMI_CONF 指过去），互不污染。
 
 运行：项目根目录 `python -m unittest discover -s tests -v`（build.bat 已串联）。
 """
@@ -9,7 +9,7 @@ import sys
 import tempfile
 import unittest
 
-SRC = pathlib.Path(__file__).resolve().parents[1] / "lulu-ledger-fn" / "app" / "src"
+SRC = pathlib.Path(__file__).resolve().parents[1] / "chaimi-ledger-fn" / "app" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -19,8 +19,8 @@ class EnvCase(unittest.TestCase):
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        os.environ["LULU_CONF"] = str(pathlib.Path(self._tmp.name) / "lulu.conf")
-        os.environ["LULU_DB"] = str(pathlib.Path(self._tmp.name) / "lulu.db")
+        os.environ["CHAIMI_CONF"] = str(pathlib.Path(self._tmp.name) / "chaimi.conf")
+        os.environ["CHAIMI_DB"] = str(pathlib.Path(self._tmp.name) / "chaimi.db")
         import db
         importlib.reload(db)
         db.reset_connections()

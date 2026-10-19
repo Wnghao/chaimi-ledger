@@ -27,20 +27,20 @@ class TestBackupRetention(unittest.TestCase):
         return self._tmp / name
 
     def test_monthly_retention_removes_all_sides(self):
-        old = "lulu-ledger-202601.db"                      # 距 2026-10 超过 3 个月
-        keep = "lulu-ledger-202609.db"
+        old = "chaimi-ledger-202601.db"                      # 距 2026-10 超过 3 个月
+        keep = "chaimi-ledger-202609.db"
         for n in (old, keep):
             self._mk(n)
             self.tmpfile(n.replace(".db", ".receipts.zip")).write_bytes(b"x")
             self.tmpfile(n.replace(".db", ".conf.json")).write_bytes(b"x")
         self.backup._cleanup_old(3, self.now, yearly=False)
         self.assertFalse(self.tmpfile(old).exists())           # 主文件
-        self.assertFalse(self.tmpfile("lulu-ledger-202601.receipts.zip").exists())  # 副文件同口径
-        self.assertFalse(self.tmpfile("lulu-ledger-202601.conf.json").exists())
+        self.assertFalse(self.tmpfile("chaimi-ledger-202601.receipts.zip").exists())  # 副文件同口径
+        self.assertFalse(self.tmpfile("chaimi-ledger-202601.conf.json").exists())
         self.assertTrue(self.tmpfile(keep).exists())           # 保留期内不动
 
     def test_yearly_retention(self):
-        old, keep = "lulu-ledger-2022.db", "lulu-ledger-2025.db"
+        old, keep = "chaimi-ledger-2022.db", "chaimi-ledger-2025.db"
         for n in (old, keep):
             self._mk(n)
             self.tmpfile(n.replace(".db", ".conf.json")).write_bytes(b"x")
@@ -49,17 +49,17 @@ class TestBackupRetention(unittest.TestCase):
         self.assertTrue(self.tmpfile(keep).exists())
 
     def test_name_validation(self):
-        self.assertTrue(self.backup._valid_name("lulu-ledger-202601.db"))
+        self.assertTrue(self.backup._valid_name("chaimi-ledger-202601.db"))
         for bad in ("../x", "a/b", "other.db", "",
-                    "lulu-ledger-202601.conf.json",    # 副文件（含明文 Key）不可经 API 触达
-                    "lulu-ledger-202601.receipts.zip"):
+                    "chaimi-ledger-202601.conf.json",    # 副文件（含明文 Key）不可经 API 触达
+                    "chaimi-ledger-202601.receipts.zip"):
             self.assertFalse(self.backup._valid_name(bad))
 
     def test_restore_rejects_non_sqlite_file(self):
         """复查项④：非 SQLite 文件恢复 → ValueError（server 映射 400），不再裸 500。"""
-        (self._tmp / "lulu-ledger-bad.db").write_bytes(b"definitely not a sqlite file")
+        (self._tmp / "chaimi-ledger-bad.db").write_bytes(b"definitely not a sqlite file")
         with self.assertRaises(ValueError):
-            self.backup.restore_backup("lulu-ledger-bad.db")
+            self.backup.restore_backup("chaimi-ledger-bad.db")
 
 
 class TestAIRules(unittest.TestCase):
@@ -123,6 +123,66 @@ class TestAIRules(unittest.TestCase):
         out = list(ai.sse_stream(iter([{"text": "你好"}, {"error": "x"}])))
         self.assertEqual(out[0], 'data: {"text": "你好"}\n\n')
         self.assertEqual(out[-1], "data: [DONE]\n\n")
+
+
+class TestProcessReceipt(unittest.TestCase):
+    """小票裁剪+压缩：留白裁剪 / 缩放 / 重编码 / 安全兜底。"""
+
+    def _mk_receipt(self, w=3000, h=4000, content_box=(800, 1200, 2200, 2800)):
+        """构造模拟小票照片：大图中间有小块文字区域，四周是均匀背景。"""
+        from PIL import Image, ImageDraw
+        import tempfile, pathlib
+        img = Image.new("RGB", (w, h), (200, 200, 200))   # 桌面灰色背景
+        draw = ImageDraw.Draw(img)
+        l, t, r, b = content_box
+        draw.rectangle([l, t, r, b], fill=(255, 255, 255))  # 小票白色区域
+        for y in range(t + 50, b - 50, 40):                  # 模拟文字行
+            draw.line([(l + 30, y), (r - 30, y)], fill=(30, 30, 30), width=3)
+        p = pathlib.Path(tempfile.mkdtemp()) / "test_receipt.jpg"
+        img.save(p, "JPEG", quality=95)
+        return p, w * h
+
+    def test_crop_and_compress(self):
+        import bot_core
+        p, orig_area = self._mk_receipt()
+        orig_size = p.stat().st_size
+        self.assertTrue(bot_core.process_receipt(p))
+        from PIL import Image
+        with Image.open(p) as img:
+            new_w, fmt = img.size[0], img.format
+        # 缩放生效：原图 3000px 宽 → ≤1080px
+        self.assertLessEqual(new_w, 1080)
+        # 压缩生效：体积应显著小于原大图（4000×3000 高质量 JPEG）
+        self.assertLess(p.stat().st_size, orig_size)
+        self.assertEqual(fmt, "JPEG")
+
+    def test_uniform_image_kept(self):
+        """全均匀图像（无内容）→ 保留原图（安全兜底）。"""
+        import bot_core
+        from PIL import Image
+        import tempfile, pathlib
+        p = pathlib.Path(tempfile.mkdtemp()) / "blank.jpg"
+        Image.new("RGB", (1000, 1000), (128, 128, 128)).save(p, "JPEG")
+        before = p.stat().st_size
+        # 不崩溃，返回 True（重编码了，但没裁剪——全图都是均匀的）
+        result = bot_core.process_receipt(p)
+        self.assertTrue(result)
+
+    def test_nonexistent_file_no_crash(self):
+        import bot_core
+        self.assertFalse(bot_core.process_receipt("不存在的文件.jpg"))
+
+    def test_small_content_not_cropped(self):
+        """边界框面积 < 原图 10% → 保留原图（防误裁）。"""
+        import bot_core
+        p, _ = self._mk_receipt(content_box=(1450, 1950, 1550, 2050))  # 100×100 = 0.08%
+        before_size = p.stat().st_size
+        bot_core.process_receipt(p)
+        from PIL import Image
+        with Image.open(p) as img:
+            width = img.size[0]
+        # 没被裁到只剩一小块（宽高应接近原图或已缩放但比例不变）
+        self.assertGreater(width, 500)
 
 
 class TestBotChain(EnvCase):

@@ -1,0 +1,140 @@
+[
+ {
+  "amount": 2550,
+  "attribution": "测试用户01",
+  "date": "2026-09-01 08:30:00",
+  "hash_fields": [
+   "2026-09-01 08:30:00",
+   "商户消费",
+   "肯德基",
+   "肯德基早餐",
+   "2550",
+   "WX0000000000000001"
+  ],
+  "is_refund": false,
+  "merchant": "肯德基",
+  "name": "肯德基早餐",
+  "note": "肯德基",
+  "order_no": "WX0000000000000001",
+  "pay_account": "零钱",
+  "platform": "wechat",
+  "source_category": "商户消费",
+  "type": "expense",
+  "wechat_type": "商户消费"
+ },
+ {
+  "amount": 10000,
+  "attribution": "测试用户01",
+  "date": "2026-09-02 09:00:00",
+  "hash_fields": [
+   "2026-09-02 09:00:00",
+   "微信红包（单发）",
+   "张三",
+   "/",
+   "10000",
+   "WX0000000000000002"
+  ],
+  "is_refund": false,
+  "merchant": "张三",
+  "name": "张三",
+  "note": "张三 /",
+  "order_no": "WX0000000000000002",
+  "pay_account": "零钱",
+  "platform": "wechat",
+  "source_category": "微信红包（单发）",
+  "type": "expense",
+  "wechat_type": "微信红包（单发）"
+ },
+ {
+  "amount": 10000,
+  "attribution": "测试用户01",
+  "date": "2026-09-03 09:05:00",
+  "hash_fields": [
+   "2026-09-03 09:05:00",
+   "微信红包（单发）-退款",
+   "张三",
+   "/",
+   "10000",
+   "WX0000000000000003"
+  ],
+  "is_refund": true,
+  "merchant": "张三",
+  "name": "张三",
+  "note": "张三 /",
+  "order_no": "WX0000000000000003",
+  "pay_account": "/",
+  "platform": "wechat",
+  "source_category": "微信红包（单发）",
+  "type": "transfer",
+  "wechat_type": "微信红包（单发）"
+ },
+ {
+  "amount": 50000,
+  "attribution": "测试用户01",
+  "date": "2026-09-04 10:00:00",
+  "hash_fields": [
+   "2026-09-04 10:00:00",
+   "信用卡还款",
+   "招商银行信用卡(1234)",
+   "/",
+   "50000",
+   "WX0000000000000004"
+  ],
+  "is_refund": false,
+  "merchant": "招商银行信用卡(1234)",
+  "name": "招商银行信用卡(1234)",
+  "note": "招商银行信用卡(1234)",
+  "order_no": "WX0000000000000004",
+  "pay_account": "零钱",
+  "platform": "wechat",
+  "source_category": "信用卡还款",
+  "type": "transfer",
+  "wechat_type": "信用卡还款"
+ },
+ {
+  "amount": 6600,
+  "attribution": "测试用户01",
+  "date": "2026-09-05 12:00:00",
+  "hash_fields": [
+   "2026-09-05 12:00:00",
+   "转账",
+   "李四",
+   "/",
+   "6600",
+   "WX0000000000000005"
+  ],
+  "is_refund": false,
+  "merchant": "李四",
+  "name": "李四",
+  "note": "李四 九月借款",
+  "order_no": "WX0000000000000005",
+  "pay_account": "零钱",
+  "platform": "wechat",
+  "source_category": "转账",
+  "type": "income",
+  "wechat_type": "转账"
+ },
+ {
+  "amount": 10000,
+  "attribution": "测试用户01",
+  "date": "2026-09-07 08:00:00",
+  "hash_fields": [
+   "2026-09-07 08:00:00",
+   "零钱提现",
+   "/",
+   "/",
+   "10000",
+   "WX0000000000000007"
+  ],
+  "is_refund": false,
+  "merchant": "/",
+  "name": "",
+  "note": "/",
+  "order_no": "WX0000000000000007",
+  "pay_account": "零钱",
+  "platform": "wechat",
+  "source_category": "零钱提现",
+  "type": "transfer",
+  "wechat_type": "零钱提现"
+ }
+]

@@ -1,0 +1,78 @@
+[
+ {
+  "amount": 3000,
+  "attribution": "小明",
+  "date": "2026-09-05 09:00:00",
+  "export_id": "101",
+  "export_ref": "",
+  "hash_fields": [
+   "2026-09-05 09:00:00",
+   "午餐",
+   "3000",
+   "餐饮美食",
+   ""
+  ],
+  "is_refund": false,
+  "merchant": "",
+  "name": "午餐",
+  "note": "",
+  "order_no": "E1",
+  "origin_source": "app",
+  "pay_account": "现金",
+  "platform": "export",
+  "source_category": "餐饮美食",
+  "to_account_name": "",
+  "type": "expense"
+ },
+ {
+  "amount": 3000,
+  "attribution": "小明",
+  "date": "2026-09-05 12:00:00",
+  "export_id": "102",
+  "export_ref": "101",
+  "export_refund_idx": -1,
+  "hash_fields": [
+   "2026-09-05 12:00:00",
+   "退货",
+   "3000",
+   "退款",
+   ""
+  ],
+  "is_refund": false,
+  "merchant": "",
+  "name": "退货",
+  "note": "",
+  "order_no": "E2",
+  "origin_source": "app",
+  "pay_account": "现金",
+  "platform": "export",
+  "source_category": "退款",
+  "to_account_name": "",
+  "type": "transfer"
+ },
+ {
+  "amount": 50000,
+  "attribution": "小明",
+  "date": "2026-09-06 08:00:00",
+  "export_id": "103",
+  "export_ref": "",
+  "hash_fields": [
+   "2026-09-06 08:00:00",
+   "零钱转入",
+   "50000",
+   "账户转账",
+   "工资结余"
+  ],
+  "is_refund": false,
+  "merchant": "",
+  "name": "零钱转入",
+  "note": "工资结余",
+  "order_no": "E3",
+  "origin_source": "manual",
+  "pay_account": "现金",
+  "platform": "export",
+  "source_category": "账户转账",
+  "to_account_name": "微信支付",
+  "type": "transfer"
+ }
+]

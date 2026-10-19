@@ -1,0 +1,1720 @@
+"""chaimi-server：FastAPI 入口（记账 CRUD / 统计 / 导入 / 映射 / 备份 / AI，DESIGN 五章）。
+
+运行形态：
+  飞牛：  server.py --uds ${TRIM_APPDEST}/app.sock    经统一网关 /app/chaimi-ledger 访问
+  本地：  server.py --host 127.0.0.1 --port 18710     开发调试
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from contextlib import asynccontextmanager
+import base64
+import csv
+import io
+import os
+import re
+import secrets
+import time
+from urllib.parse import quote
+import threading
+import zipfile
+from datetime import date, datetime
+from pathlib import Path
+from typing import Optional
+from decimal import Decimal, InvalidOperation
+
+import uvicorn
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               Response, StreamingResponse)
+from pydantic import BaseModel
+
+import ai
+import applog
+import backup
+import bot_core
+import bot_ilink
+import config
+import db as dbm
+import import_bill as ib
+
+applog.setup()   # 进程内首个初始化点：后续 get() 的子 logger 统一走双 handler
+log = applog.get("server")
+
+PREFIX = config.TRIM_GATEWAY_PREFIX
+_STATIC = Path(__file__).resolve().parent.parent / "static"
+# 应用图片（头像等，与桌面图标同目录）：后期更换头像直接替换文件即可（路由禁缓存，替换后刷新生效）
+_IMAGES = Path(__file__).resolve().parent.parent / "server" / "images"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动/停机钩子（lifespan，替代已弃用的 on_event）。"""
+    dbm.init_db()
+    _auto_backup.start()
+    _bot_apply()
+    # 应用文件夹定位诊断：找不到时备份回退 @appdata，日志留痕便于排查
+    bot_core._on_change = _bump_rev          # bot 记账/改动 → 唤醒长轮询 → 前端自刷新
+    share = config.app_share_dir()
+    log.info(f"应用文件夹: {share or '未找到（备份回退 @appdata/backups）'}")
+    log.info(f"chaimi-ledger v{_app_version()}")   # 版本留痕:确认线上跑的是哪个包
+    # 模型自检走后台线程:服务商下线旧模型(如百炼一代 qwen-vl-*)时自动换新,不阻塞启动
+    def _model_check():
+        try:
+            for line in ai.ensure_models():
+                log.info(line)
+        except Exception as e:
+            log.warning(f"模型自检失败: {e}")
+    threading.Thread(target=_model_check, daemon=True).start()
+    # 小票孤儿文件兜底清理:启动即扫一次(顺带清历史遗留),之后每日一次
+    def _sweep():
+        while True:
+            try:
+                sweep_orphan_receipts()
+            except Exception as e:
+                log.warning(f"小票兜底清理异常: {e}")
+            time.sleep(24 * 3600)
+    threading.Thread(target=_sweep, daemon=True, name="receipt-sweep").start()
+    yield
+    _ilink.stop_all()
+
+app = FastAPI(title="柴米记账", lifespan=lifespan)
+
+_AUTH_EXEMPT = ("/healthz",)   # NAS 探活放行；其余（含静态资源，浏览器记凭证后自动携带）一律过门
+
+def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
+    """Basic Auth 常量时间校验（评估 R-04 中期项，默认关闭，见 README 部署前提）。"""
+    if not authorization.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    user, sep, pwd = decoded.partition(":")
+    cfg_user = str(cfg.get("username") or "")
+    cfg_pwd = str(cfg.get("password") or "")
+    if not cfg_user or not cfg_pwd:
+        return False   # enabled 但未配置凭证：恒拒绝（fail-closed，测试抓出的空凭证匹配漏洞）
+    return sep == ":" and _ct_eq(user, cfg_user) and _ct_eq(pwd, cfg_pwd)
+
+@app.middleware("http")
+async def web_auth_guard(request: Request, call_next):
+    """可选 Web 鉴权门（评估 R-04）：chaimi.conf 的 web_auth.enabled=true 时启用。
+    定义于 strip_gateway_prefix 之前 → 作为内层中间件拿到剥完网关前缀的路径。
+    凭证为空视为未配置：拒绝并挑战，强制管理员补齐配置（fail-closed）。"""
+    cfg = config.load().get("web_auth") or {}
+    if cfg.get("enabled") and request.url.path not in _AUTH_EXEMPT:
+        if not _basic_auth_ok(request.headers.get("authorization") or "", cfg):
+            return Response(content=b'{"detail":"unauthorized"}', status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="chaimi-ledger"'},
+                            media_type="application/json")
+    return await call_next(request)
+
+@app.middleware("http")
+async def strip_gateway_prefix(request: Request, call_next):
+    p = request.scope["path"]
+    if PREFIX and p.startswith(PREFIX):
+        p = p[len(PREFIX):] or "/"
+        request.scope["path"] = p
+    return await call_next(request)
+
+_auto_backup = backup.AutoBackup()
+_ilink = bot_ilink.ILinkManager()   # 通道 A：多凭证管理(一账本一用户一机器人)
+_REV = {"n": 0}                     # 数据变更计数(写库时 +1,长轮询 /api/rev/wait 按此唤醒前端刷新)
+_REV_EV = threading.Event()
+
+def _bump_rev() -> None:
+    _REV["n"] += 1
+    _REV_EV.set()
+
+def _bot_cfg() -> dict:
+    """bot 配置段便捷读取（段缺失回退空 dict）；写路径各自 load/save 整份配置。"""
+    return config.load().get("bot") or {}
+
+def _bot_apply() -> None:
+    """机器人热切换（DESIGN 十章）：direct=按凭证列表差量启停;其余全停。
+    sidecar 随 mode 一并差量启停（仅 gateway 模式监听 TCP，默认部署不常驻白跑端口）。"""
+    cfg = config.load()
+    if (cfg.get("bot") or {}).get("mode") == "direct":
+        _ilink.apply(bot_ilink.ilink_entries(cfg))
+    else:
+        _ilink.stop_all()
+    _sidecar_apply()
+
+def _app_version() -> str:
+    """应用版本号:优先 build 时生成的 static/version.txt(真机部署树无 manifest),
+    开发环境回落向上找 manifest;都找不到给 ?。启动留痕与页面注入共用。"""
+    try:
+        vf = _STATIC / "version.txt"
+        if vf.is_file():
+            m = re.search(r"version\s*=\s*(\S+)", vf.read_text(encoding="utf-8"))
+            if m:
+                return m.group(1)
+        mani = next((p / "manifest" for p in Path(__file__).resolve().parents
+                     if (p / "manifest").is_file()), None)
+        if mani:
+            m = re.search(r"^version=(.+)$", mani.read_text(encoding="utf-8"), re.M)
+            if m:
+                return m.group(1).strip()
+    except OSError:
+        pass
+    return "?"
+
+def _page(name: str) -> HTMLResponse:
+    text = (_STATIC / name).read_text(encoding="utf-8")
+    base = f'<base href="{PREFIX}/">'
+    v = _app_version()
+    # 版本号注入:前端在长轮询请求上带 cv 信标,日志一眼可见各客户端跑的哪个版本
+    text = text.replace("<head>",
+                        f'<head><script>window.CHAIMI_VER="{v}"</script>' + base, 1)
+    # 静态引用一律带 ?v=版本:版本一变 URL 即变,任何缓存层(浏览器/fnOS 网关)必取新文件。
+    # 单靠 no-cache 不够——网关可能按扩展名缓存 .js,升级后出现"新 HTML 引用旧 JS"
+    # (曾出现新 HTML 引用旧 JS 导致按钮无反应),HTML 里的引用链必须随版本整体换血
+    text = re.sub(r'((?:src|href)="static/[^"?]+)(?=")', rf'\1?v={v}', text)
+    # no-store:HTML 本体不允许任何层缓存——网关若缓存了旧 HTML,里面的旧 JS 引用会一直
+    # 命中旧缓存,版本角标/?v= 都救不回来;JS/CSS 靠 ?v= 换 URL,不依赖此头
+    return HTMLResponse(text, headers={"Cache-Control": "no-store"})
+
+def conn():
+    return dbm.connect()
+
+def _to_end(s: str, *, default: str = "") -> str:
+    """区间末端：10 位日期（YYYY-MM-DD）补 23:59:59 含当天，否则按 default 兜底。"""
+    return (s + " 23:59:59") if len(s) == 10 else default
+
+def _date_where(frm: str, to: str, col: str = "t.date", end: str = "") -> tuple[str, list]:
+    """日期区间过滤三行式（流水/账户/归属/导出 5 处共用）：frm 一律原样 >=；
+    to 端按 end——''=原样排他（to 已是完整时刻或调用方保证排他）；
+    '<='=10 位膨胀当天末尾后包含（小票导出）；'<'=膨胀后排他（流水列表默认，
+    to_exclusive 场景传 ''）。"""
+    frag, params = "", []
+    if frm:
+        frag += f" AND {col}>=?"
+        params.append(frm)
+    if to:
+        frag += f" AND {col}{end or '<'}?"
+        params.append(_to_end(to, default=to) if end else to)
+    return frag, params
+
+def _safe_name(name: str) -> str:
+    """图片/小票文件名校验（app_image/get_receipt 共用）：拒绝路径穿越与分隔符。"""
+    if not name or ".." in name or "/" in name or "\\" in name:
+        raise HTTPException(400)
+    return name
+
+def _ledger_or_404(ledger_id: int):
+    row = conn().execute("SELECT id FROM ledgers WHERE id=?", (ledger_id,)).fetchone()
+    if not row:
+        raise HTTPException(404, "账本不存在")
+
+# ---------- 页面 / 健康 ----------
+
+@app.get("/", include_in_schema=False)
+def index():
+    return _page("app.html")
+
+@app.get("/home", include_in_schema=False)
+def home():
+    """登录/用户选择页：主应用检测到无当前用户（首次/缓存失效）时跳转至此。"""
+    return _page("home.html")
+
+@app.get("/static/{name}", include_in_schema=False)
+def static_file(name: str):
+    _safe_name(name)   # 与 /images /receipts 对称的纵深防护（路径穿越不可利用但保持一致）
+    p = _STATIC / name
+    if not p.is_file():
+        raise HTTPException(404)
+    # 单文件应用拆分后避免升级后浏览器沿用旧 CSS/JS：与 _page 一致禁缓存
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+@app.get("/images/{name}", include_in_schema=False)
+def app_image(name: str):
+    """应用图片：app/server/images 目录。
+    禁缓存——后期直接替换同名文件（如换新头像）刷新即生效，无需改代码。"""
+    _safe_name(name)
+    p = _IMAGES / name
+    if not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, headers={"Cache-Control": "no-cache"})
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "version": os.environ.get("TRIM_APPVER", "?")}
+
+# ---------- 账本 ----------
+
+class LedgerIn(BaseModel):
+    name: str
+    icon: str = ""
+    currency: str = "CNY"
+    budget: Optional[int] = None
+
+@app.get("/api/ledgers")
+def list_ledgers():
+    return [dict(r) for r in conn().execute("SELECT * FROM ledgers ORDER BY sort, id")]
+
+@app.post("/api/ledgers")
+def create_ledger(body: LedgerIn):
+    with conn() as c:
+        cur = c.execute("INSERT INTO ledgers(name, icon, currency) VALUES(?,?,?)",
+                        (body.name, body.icon, body.currency))
+        lid = cur.lastrowid
+        # 新账本同样播种分类/账户（与首建 seed 共用，存在即跳过）
+        dbm.seed_ledger_defaults(c, lid)
+        # v6 起映射为账本级，新账本需显式种默认映射
+        dbm.seed_default_mappings(c, lid)
+    return {"id": lid}
+
+@app.put("/api/ledgers/{lid}")
+def update_ledger(lid: int, body: LedgerIn):
+    with conn() as c:
+        c.execute("UPDATE ledgers SET name=?, icon=?, currency=?, "
+                  "budget=COALESCE(?, budget) WHERE id=?",
+                  (body.name, body.icon, body.currency, body.budget, lid))
+    return {"ok": True}
+
+@app.delete("/api/ledgers/{lid}")
+def delete_ledger(lid: int):
+    with conn() as c:
+        for t in ("transactions", "category_mappings", "categories", "accounts",
+                  "attributions", "attribution_groups"):
+            c.execute(f"DELETE FROM {t} WHERE ledger_id=?", (lid,))
+        c.execute("DELETE FROM ledgers WHERE id=?", (lid,))
+    return {"ok": True}
+
+# ---------- 分类 / 账户 ----------
+
+@app.get("/api/categories")
+def list_categories(ledger: int):
+    rows = [dict(r) for r in conn().execute(
+        "SELECT c.*, p.name AS parent_name FROM categories c "
+        "LEFT JOIN categories p ON c.parent_id=p.id WHERE c.ledger_id=? ORDER BY c.sort, c.id", (ledger,))]
+    return rows
+
+class CategoryIn(BaseModel):
+    name: str
+    type: str = "expense"
+    parent_id: Optional[int] = None
+    icon: str = ""
+
+@app.post("/api/categories")
+def create_category(ledger: int, body: CategoryIn):
+    with conn() as c:
+        cur = c.execute(
+            "INSERT INTO categories(ledger_id, type, name, parent_id, icon) VALUES(?,?,?,?,?)",
+            (ledger, body.type, body.name, body.parent_id, body.icon))
+    return {"id": cur.lastrowid}
+
+@app.put("/api/categories/{cid}")
+def update_category(cid: int, body: CategoryIn):
+    with conn() as c:
+        c.execute("UPDATE categories SET name=?, icon=? WHERE id=?", (body.name, body.icon, cid))
+        # v6 起映射走 category_id 外键，改名自动联动，无需同步映射表
+    return {"ok": True}
+
+@app.delete("/api/categories/{cid}")
+def delete_category(cid: int):
+    with conn() as c:
+        c.execute("UPDATE transactions SET category_id=NULL, need_confirm=1 WHERE category_id=?", (cid,))
+        c.execute("DELETE FROM category_mappings WHERE category_id=?", (cid,))
+        c.execute("DELETE FROM categories WHERE parent_id=?", (cid,))
+        c.execute("DELETE FROM categories WHERE id=?", (cid,))
+    return {"ok": True}
+
+# 存储不动（tags.attribution 仍存原始名），两条归组路径：
+#   ① 名单路径：归属名查 attributions.group_id（导入的 liulu·支付宝 → 组「老公」，导入自动映射）
+#   ② 同名路径：归属名恰与组名相同（编辑弹窗选分组保存的组名）→ 直接归该组
+_ATTR_RESOLVE = (
+    "LEFT JOIN attributions _ax ON _ax.ledger_id=t.ledger_id "
+    "AND _ax.name=json_extract(t.tags,'$.attribution') "
+    "LEFT JOIN attribution_groups _gx ON _gx.id=_ax.group_id "
+    "LEFT JOIN attribution_groups _g2 ON _g2.ledger_id=t.ledger_id "
+    "AND _g2.name=json_extract(t.tags,'$.attribution') ")
+_ATTR_EXPR = "COALESCE(_gx.name, _g2.name, json_extract(t.tags,'$.attribution'))"
+_ATTR_DISPLAY = (_ATTR_EXPR + " AS attr_display")
+
+def _attr_group_absorb(c, ledger: int, name: str) -> None:
+    """建组/改组时吸收同名归属行：其流水的归属名==组名，经同名路径仍归本组，名单不保留孤行。"""
+    c.execute("DELETE FROM attributions WHERE ledger_id=? AND name=?", (ledger, name))
+
+def _clear_user_attribution(c, ledger: int, name: str) -> None:
+    """删组时清掉用户侧（手动/AI）流水存的该组名；导入流水的原始归属保留（账单真实数据）。"""
+    ph = ",".join("?" * len(dbm.IMPORT_SOURCES))
+    c.execute(f"UPDATE transactions SET tags=json_remove(tags,'$.attribution') "
+              f"WHERE ledger_id=? AND json_extract(tags,'$.attribution')=? "
+              f"AND COALESCE(source,'manual') NOT IN ({ph})",
+              (ledger, name, *dbm.IMPORT_SOURCES))
+
+def _check_attr_group_name(c, ledger: int, name: str, gid: int | None = None) -> None:
+    """组名唯一（改名传 gid 排除自身）；与归属名同名的场景走吸收而非报错（见 _attr_group_absorb）。"""
+    row = c.execute("SELECT id FROM attribution_groups WHERE ledger_id=? AND name=?",
+                    (ledger, name)).fetchone()
+    if row and row["id"] != gid:
+        raise HTTPException(400, f"分组「{name}」已存在")
+
+@app.get("/api/attribution-groups")
+def list_attr_groups(ledger: int):
+    return [dict(r) for r in conn().execute(
+        "SELECT g.*, (SELECT COUNT(*) FROM attributions a WHERE a.group_id=g.id) AS member_count, "
+        "(SELECT group_concat(a.name, '、') FROM attributions a WHERE a.group_id=g.id) AS members "
+        "FROM attribution_groups g WHERE g.ledger_id=? ORDER BY g.sort, g.id", (ledger,))]
+
+class AttrGroupIn(BaseModel):
+    name: str
+    avatar: str = "f"
+
+def _check_avatar(v: str) -> str:
+    if v not in ("m", "f"):
+        raise HTTPException(400, "头像无效")
+    return v
+
+@app.post("/api/attribution-groups")
+def create_attr_group(ledger: int, body: AttrGroupIn):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "用户名不能为空")
+    avatar = _check_avatar(body.avatar)
+    with conn() as c:
+        _check_attr_group_name(c, ledger, name)
+        _attr_group_absorb(c, ledger, name)   # 同名归属行吸收（其流水经同名路径仍归本组）
+        cur = c.execute("INSERT INTO attribution_groups(ledger_id, name, avatar) VALUES(?,?,?)",
+                        (ledger, name, avatar))
+    return {"ok": True, "id": cur.lastrowid}
+
+@app.put("/api/attribution-groups/{gid}")
+def rename_attr_group(gid: int, body: AttrGroupIn):
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "用户名不能为空")
+    avatar = _check_avatar(body.avatar)
+    with conn() as c:
+        g = c.execute("SELECT ledger_id, name FROM attribution_groups WHERE id=?", (gid,)).fetchone()
+        if not g:
+            raise HTTPException(404, "分组不存在")
+        _check_attr_group_name(c, g["ledger_id"], name, gid)
+        # 手动账存的是组名（编辑弹窗选分组）：改名同步改写已存旧组名的流水，否则会「掉组」
+        c.execute("UPDATE transactions SET tags=json_set(tags,'$.attribution',?) "
+                  "WHERE ledger_id=? AND json_extract(tags,'$.attribution')=?",
+                  (name, g["ledger_id"], g["name"]))
+        _attr_group_absorb(c, g["ledger_id"], name)
+        c.execute("UPDATE attribution_groups SET name=?, avatar=? WHERE id=?", (name, avatar, gid))
+    return {"ok": True}
+
+@app.delete("/api/attribution-groups/{gid}")
+def delete_attr_group(gid: int):
+    # FK ON DELETE SET NULL：名单成员自动回未分组；导入流水的原始归属名不动；
+    with conn() as c:
+        g = c.execute("SELECT ledger_id, name FROM attribution_groups WHERE id=?", (gid,)).fetchone()
+        if not g:
+            raise HTTPException(404, "用户不存在")
+        n = c.execute("SELECT COUNT(*) FROM attribution_groups WHERE ledger_id=?",
+                      (g["ledger_id"],)).fetchone()[0]
+        if n <= 1:
+            raise HTTPException(400, "至少保留一个用户")
+        _clear_user_attribution(c, g["ledger_id"], g["name"])
+        c.execute("DELETE FROM attribution_groups WHERE id=?", (gid,))
+    return {"ok": True}
+
+@app.get("/api/attributions")
+def list_attributions(ledger: int):
+    return [dict(r) for r in conn().execute(
+        "SELECT a.*, g.name AS group_name FROM attributions a "
+        "LEFT JOIN attribution_groups g ON a.group_id=g.id "
+        "WHERE a.ledger_id=? ORDER BY a.id", (ledger,))]
+
+class AttrGroupSetIn(BaseModel):
+    group_id: int | None = None
+
+@app.put("/api/attributions/{aid}")
+def update_attribution(aid: int, body: AttrGroupSetIn):
+    """归属设分组/移出组（group_id=null 移出）。只改名单表，历史流水不动，统计口径即时生效。"""
+    with conn() as c:
+        a = c.execute("SELECT ledger_id FROM attributions WHERE id=?", (aid,)).fetchone()
+        if not a:
+            raise HTTPException(404, "归属不存在")
+        if body.group_id is not None:
+            g = c.execute("SELECT ledger_id FROM attribution_groups WHERE id=?",
+                          (body.group_id,)).fetchone()
+            if not g or g["ledger_id"] != a["ledger_id"]:
+                raise HTTPException(400, "分组不存在")
+        c.execute("UPDATE attributions SET group_id=? WHERE id=?", (body.group_id, aid))
+    return {"ok": True}
+
+@app.get("/api/accounts")
+def list_accounts(ledger: int, frm: str = Query("", alias="from"), to: str = ""):
+    # frm：形参不能叫 from（Python 关键字），query 名用 alias 保持 ?from=
+    rows = [dict(r) for r in conn().execute(
+        "SELECT * FROM accounts WHERE ledger_id=? ORDER BY sort, id", (ledger,))]
+    # 原来膨胀成 <=to 23:59:59 会把下月/下年第一天的流水多算进来
+    where = ("WHERE ledger_id=? AND (type='expense' OR "
+             "(type='transfer' AND refund_for IS NOT NULL)) AND account_id IS NOT NULL")
+    frag, params = _date_where(frm, to, "date")
+    where += frag
+    args = [ledger, *params]
+    gross, refund = {}, {}
+    for ty, a, amt in conn().execute(
+            f"SELECT type, account_id, amount FROM transactions {where}", args):
+        if ty == "expense":
+            gross[a] = gross.get(a, 0) + amt
+        else:                      # 退款转账：钱退回 account_id
+            refund[a] = refund.get(a, 0) + amt
+    for r in rows:
+        r["spend"] = gross.get(r["id"], 0) - refund.get(r["id"], 0)
+    # 含未选账户的支出、退款按原消费日归因；与按账户拆分的 spend 列因口径差异可能不相等
+    if frm or to:
+        s = dbm.stats_summary_range(conn(), ledger, frm, to or "9999-12-31")
+        for r in rows:
+            r["net_expense"] = s["net_expense"]   # 同值平铺到每个账户，前端取一次即可
+    return rows
+
+class AccountIn(BaseModel):
+    name: str
+    type: str = "cash"
+
+@app.post("/api/accounts")
+def create_account(ledger: int, body: AccountIn):
+    with conn() as c:
+        cur = c.execute("INSERT INTO accounts(ledger_id, name, type) VALUES(?,?,?)",
+                        (ledger, body.name, body.type))
+    return {"id": cur.lastrowid}
+
+@app.put("/api/accounts/{aid}")
+def update_account(aid: int, body: AccountIn):
+    with conn() as c:
+        c.execute("UPDATE accounts SET name=?, type=? WHERE id=?",
+                  (body.name, body.type, aid))
+    return {"ok": True}
+
+@app.delete("/api/accounts/{aid}")
+def delete_account(aid: int):
+    with conn() as c:
+        c.execute("UPDATE transactions SET account_id=NULL, need_confirm=1 WHERE account_id=?", (aid,))
+        c.execute("DELETE FROM accounts WHERE id=?", (aid,))
+    return {"ok": True}
+
+# ---------- 流水 ----------
+
+class TxIn(BaseModel):
+    type: str
+    amount: int                      # 分
+    category_id: Optional[int] = None
+    account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    date: str
+    name: Optional[str] = None       # 交易名称（导入流水带；可编辑）
+    merchant: Optional[str] = None   # 交易对方（导入流水带；可编辑）
+    note: str = ""
+    tags: dict = {}
+    receipt_path: Optional[str] = None   # None=保持；""=清空；"path"=覆盖
+    source: str = "app"
+    ai_meta: dict = {}
+    order_no: Optional[str] = None   # 订单号（退款匹配键；可编辑，null=保持原值）
+    need_confirm: bool = False
+    refund_for: Optional[int] = None
+
+RENQING_NAME_SQL = "COALESCE(NULLIF(TRIM(t.name),''), NULLIF(TRIM(t.note),''), '（未命名）')"
+# 人情往来的取数条件：一级分类为「人情往来」（收支两侧同名分类都算）
+_RENQING_CAT_SQL = ("t.category_id IN (SELECT id FROM categories "
+                    "WHERE ledger_id=? AND name='人情往来' AND parent_id IS NULL)")
+
+@app.get("/api/transactions")
+def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str = "", type: str = "",
+                      category: int = 0, need_confirm: bool = False, q: str = "",
+                      renqing_name: str = "", to_exclusive: bool = False,
+                      page: int = 1, page_size: int = 50):
+    sql = ["SELECT t.*, c.name AS category_name, a.name AS account_name, "
+           "ro.id AS ro_id, ro.date AS ro_date, ro.name AS ro_name, ro.note AS ro_note, "
+           "ro.amount AS ro_amount, ro.type AS ro_type, ro.category_id AS ro_category_id, "
+           "ro.account_id AS ro_account_id, ro.order_no AS ro_order_no, ro.merchant AS ro_merchant, "
+           "ro.source AS ro_source, ro.tags AS ro_tags, ro.need_confirm AS ro_need_confirm, "
+           "rc.name AS ro_category_name, ra.name AS ro_account_name, "
+           + _ATTR_DISPLAY + " "
+           "FROM transactions t",
+           "LEFT JOIN categories c ON t.category_id=c.id",
+           "LEFT JOIN accounts a ON t.account_id=a.id "
+           "LEFT JOIN transactions ro ON ro.id=t.refund_for "
+           "LEFT JOIN categories rc ON ro.category_id=rc.id "
+           "LEFT JOIN accounts ra ON ro.account_id=ra.id "
+           + _ATTR_RESOLVE +
+           "WHERE t.ledger_id=?"]
+    args: list = [ledger]
+    if q.strip():
+        # （交易对方下线）；归属按显示口径匹配（组名优先，_ATTR_RESOLVE 已 JOIN）；
+        # 金额单独走精确匹配——LIKE 无法表达小数点，输入可解析为数字时按「分」比对。
+        # 退款对只看主行（t），原交易由 ro_* 提供
+        kw = f"%{q.strip()}%"
+        or_conds = ["t.name LIKE ?", "t.note LIKE ?", "t.order_no LIKE ?",
+                    "t.merchant LIKE ?",
+                    "c.name LIKE ?", f"{_ATTR_EXPR} LIKE ?"]
+        or_args = [kw] * 6
+        try:
+            cents = int(Decimal(q.strip()) * 100)
+            or_conds.append("t.amount=?")
+            or_args.append(cents)
+        except InvalidOperation:
+            pass
+        sql.append("AND (" + " OR ".join(or_conds) + ")")
+        args += or_args
+    if _from or to:
+        # to_exclusive=1：to 为排他上界原样使用（裸日期对 10 位纯日期行和 19 位带时间行都正确排他；
+        # 补 00:00:00 反而会把 10 位的边界日手工流水包含进来）。
+        # 默认：10 位日期膨胀为当天 23:59:59（含当天，供日视图/自定义区间用）
+        frag, params = _date_where(_from, to, end="" if to_exclusive else "<")
+        sql.append(frag)
+        args += params
+    if type:
+        sql.append("AND t.type=?")
+        args.append(type)
+    if category:
+        # （退款行 type=transfer 且 category_id 常不落本分类，不连带取会丢失退款双卡片）
+        cat_sql = "SELECT id FROM categories WHERE ledger_id=? AND (id=? OR parent_id=?)"
+        sql.append(f"AND (t.category_id IN ({cat_sql}) "
+                   f"OR t.refund_for IN (SELECT id FROM transactions WHERE ledger_id=? AND category_id IN ({cat_sql})))")
+        args += [ledger, category, category, ledger, ledger, category, category]
+    if need_confirm:
+        sql.append("AND t.need_confirm=1")
+    if renqing_name:
+        # 人情明细：分类=人情往来 + 名称精确匹配（与 /api/stats/renqing 的分组键同一表达式）
+        sql.append(f"AND {_RENQING_CAT_SQL}")
+        sql.append(f"AND {RENQING_NAME_SQL} = ?")
+        args += [ledger, renqing_name]
+    where = " ".join(sql)
+    total = conn().execute(f"SELECT COUNT(*) FROM ({where})", args).fetchone()[0]
+    rows = conn().execute(f"{where} ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?",
+                          args + [page_size, (page - 1) * page_size]).fetchall()
+    items = []
+    for r in rows:
+        d = dbm.tx_to_dict(r)
+        # 退款对：附带原交易摘要（前端用来在退款行下渲染第二张卡片）
+        if d.get("refund_for") and r["ro_id"] is not None:
+            ro_tags = dbm.jloads(r["ro_tags"]) or {}
+            d["refund_origin"] = {
+                "id": r["ro_id"], "date": r["ro_date"] or "", "name": r["ro_name"] or "",
+                "note": r["ro_note"] or "", "amount": r["ro_amount"] or 0,
+                "type": r["ro_type"] or "expense", "category_id": r["ro_category_id"],
+                "account_id": r["ro_account_id"], "order_no": r["ro_order_no"] or "",
+                "merchant": r["ro_merchant"] or "", "source": r["ro_source"] or "manual",
+                "tags": ro_tags, "need_confirm": bool(r["ro_need_confirm"]),
+                "category_name": r["ro_category_name"] or "", "account_name": r["ro_account_name"] or "",
+            }
+        else:
+            d["refund_origin"] = None
+        items.append(d)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+def _insert_tx(c, ledger: int, t: TxIn):
+    return dbm.insert_tx(
+        c, ledger, type=t.type, amount=t.amount, category_id=t.category_id,
+        account_id=t.account_id, to_account_id=t.to_account_id, date=t.date,
+        name=t.name, merchant=t.merchant, note=t.note, tags=t.tags,
+        receipt_path=t.receipt_path or None, source=t.source, ai_meta=t.ai_meta,
+        order_no=t.order_no, need_confirm=t.need_confirm)
+
+@app.post("/api/transactions")
+def create_transaction(ledger: int, body: TxIn):
+    _ledger_or_404(ledger)
+    with conn() as c:
+        tid = _insert_tx(c, ledger, body)
+        if body.refund_for:
+            _link_refund(c, tid, body.refund_for, body.amount, confidence=None)
+        if body.type == "transfer" and body.order_no:
+            ib._rescan_unmatched_refunds(c, ledger)
+    _bump_rev()   # App 侧写库同推刷新:唤醒所有页面的长轮询(与 bot 写库同源)
+    return {"id": tid}
+
+@app.put("/api/transactions/{tid}")
+def update_transaction(tid: int, body: TxIn):
+    with conn() as c:
+        # name/merchant/order_no 允许单独更新：传 null 保持原值（COALESCE），不传不会被清空
+        # receipt_path：None=保持原值；""=清空(NULL)；非空=覆盖。SQLite 无「参数是否为 NULL」的
+        # 内省，原 COALESCE(NULLIF(?, ''), receipt_path) 会把 "" 与 None 同视（都保留原值），
+        old = c.execute("SELECT receipt_path, date FROM transactions WHERE id=?", (tid,)).fetchone()
+        if not old:
+            raise HTTPException(404, "流水不存在")
+        old_path = old["receipt_path"]
+        c.execute(
+            """UPDATE transactions SET type=?, amount=?, category_id=?, account_id=?, to_account_id=?,
+               date=?, name=COALESCE(?, name), merchant=COALESCE(?, merchant),
+               order_no=COALESCE(?, order_no),
+               note=?, tags=?,
+               receipt_path=CASE WHEN ? IS NULL THEN receipt_path ELSE NULLIF(?, '') END,
+               need_confirm=? WHERE id=?""",
+            (body.type, body.amount, body.category_id, body.account_id, body.to_account_id,
+             dbm.norm_date(body.date, old=old["date"]), body.name, body.merchant, body.order_no,
+             body.note, dbm._j(body.tags), body.receipt_path, body.receipt_path,
+             1 if body.need_confirm else 0, tid))
+        # （income 自动转 transfer：不再计入收入，统计在原消费日扣减，见 DESIGN 8.5.1）
+        if body.refund_for is not None:
+            _link_refund(c, tid, body.refund_for, body.amount, confidence=None)
+        # 旧文件清理：路径发生变更（含清空为 NULL）即删旧文件；失败不影响主流程，与 DELETE 策略一致
+        new = c.execute("SELECT receipt_path FROM transactions WHERE id=?", (tid,)).fetchone()
+        new_path = new["receipt_path"]
+    if old_path and old_path != new_path:
+        bot_core.unlink_receipt(old_path)   # 失败不影响主流程，与 DELETE 策略一致
+    _bump_rev()
+    return {"ok": True}
+
+def _reject_late_origin(origin_date, refund_date) -> None:
+    """不变式：原始订单日期须 ≤ 退款日期（ISO 前 10 位比，同日含当天）。
+    仅换关联时调用——原样重报已有关联不拦，编辑退款日期等操作不被卡。"""
+    if (origin_date or "")[:10] > (refund_date or "")[:10]:
+        raise HTTPException(400, "原始订单日期晚于退款日期，不能关联")
+
+def _link_refund(c, tid: int, refund_for: int, amount: int, *, confidence: str | None) -> None:
+    """退款关联统一入口（手动编辑 / 待确认队列共用）：0=取消关联；>0=关联到该支出
+    （须同账本且为 expense）。金额相等→full，否则 partial。
+    原消费扣减、不计收支，从任何入口（前端/API/批量/队列）关联都不会出现口径分叉。
+    换关联时校验原始订单日期（见 _reject_late_origin）；confidence 由入口决定
+    （手动编辑=人工清空 NULL，队列确认=人工已核对 high）。"""
+    row = c.execute("SELECT ledger_id, date, refund_for FROM transactions WHERE id=?", (tid,)).fetchone()
+    if not row:
+        raise HTTPException(404, "流水不存在")
+    if refund_for == 0:
+        c.execute("UPDATE transactions SET refund_for=NULL, refund_status='none', refund_confidence=NULL "
+                  "WHERE id=?", (tid,))
+        return
+    o = c.execute("SELECT ledger_id, type, amount, date FROM transactions WHERE id=?", (refund_for,)).fetchone()
+    if not o or o["ledger_id"] != row["ledger_id"] or o["type"] != "expense":
+        raise HTTPException(400, "退款只能关联本账本的支出流水")
+    if refund_for != row["refund_for"]:
+        _reject_late_origin(o["date"], row["date"])
+    status = "full" if o["amount"] == amount else "partial"
+    c.execute("UPDATE transactions SET refund_for=?, refund_status=?, refund_confidence=?, type='transfer' "
+              "WHERE id=?", (refund_for, status, confidence, tid))
+
+class TxBatchIn(BaseModel):
+    """批量修改：ids=目标流水；三字段缺省=不改。
+    attribution：""=清除归属，非空=写入 tags.attribution（与原 tags 其余键合并）"""
+    ids: list[int]
+    category_id: Optional[int] = None
+    account_id: Optional[int] = None
+    attribution: Optional[str] = None
+
+@app.post("/api/transactions/batch_update")
+def batch_update_transactions(ledger: int, body: TxBatchIn):
+    _ledger_or_404(ledger)
+    if not body.ids:
+        raise HTTPException(400, "未选择流水")
+    updated = 0
+    with conn() as c:
+        for tid in body.ids:
+            row = c.execute("SELECT ledger_id, tags FROM transactions WHERE id=?", (tid,)).fetchone()
+            if not row or row["ledger_id"] != ledger:
+                continue   # 跨账本/已删的 id 直接跳过（全选后他端删数据的竞态）
+            sets, args = [], []
+            if body.category_id is not None:
+                sets.append("category_id=?")
+                args.append(body.category_id)
+            if body.account_id is not None:
+                sets.append("account_id=?")
+                args.append(body.account_id)
+            if body.attribution is not None:
+                tags = dbm.jloads(row["tags"]) or {}
+                if body.attribution:
+                    tags["attribution"] = body.attribution
+                else:
+                    tags.pop("attribution", None)
+                sets.append("tags=?")
+                args.append(dbm._j(tags))
+            if sets:
+                args.append(tid)
+                c.execute(f"UPDATE transactions SET {', '.join(sets)} WHERE id=?", args)
+                updated += 1
+    if updated:
+        _bump_rev()
+    return {"updated": updated}
+
+@app.delete("/api/transactions/{tid}")
+def delete_transaction(tid: int):
+    with conn() as c:
+        old_path = dbm.delete_tx(c, tid)
+    bot_core.unlink_receipt(old_path)   # 无小票路径时 no-op
+    _bump_rev()
+    return {"ok": True}
+
+# ---------- 待确认队列 ----------
+
+@app.get("/api/pending")
+def pending(ledger: int, kind: str = ""):
+    sql = ("SELECT t.*, c.name AS category_name, " + _ATTR_DISPLAY + " "
+           "FROM transactions t "
+           "LEFT JOIN categories c ON t.category_id=c.id "
+           + _ATTR_RESOLVE +
+           "WHERE t.ledger_id=? AND t.need_confirm=1")
+    args = [ledger]
+    if kind == "refund":
+        sql += " AND t.refund_for IS NULL AND t.type='transfer' AND t.tags LIKE '%退款%'"
+    return [dbm.tx_to_dict(r) for r in conn().execute(sql + " ORDER BY t.date DESC", args)]
+
+class ResolveIn(BaseModel):
+    category_id: Optional[int] = None
+    account_id: Optional[int] = None
+    refund_for: Optional[int] = None
+    learn: bool = True
+
+@app.post("/api/pending/{tid}/resolve")
+def resolve_pending(tid: int, body: ResolveIn):
+    """处理待确认：改分类（可选 learn 回写映射）/ 关联退款。"""
+    c = conn()
+    tx = c.execute("SELECT * FROM transactions WHERE id=?", (tid,)).fetchone()
+    if not tx:
+        raise HTTPException(404)
+    with c:
+        if body.category_id is not None:
+            c.execute("UPDATE transactions SET category_id=?, need_confirm=0 WHERE id=?",
+                      (body.category_id, tid))
+            # 仅当分类真的被用户改过才回写学习映射；原样确认不是用户意图，不学习。
+            # 学习键用导入时存进 ai_meta 的原始来源分类名（v6 前用 note，导入行常为空导致学不到）
+            if body.learn and body.category_id != tx["category_id"]:
+                src = (dbm.jloads(tx["ai_meta"]) or {}).get("map_source")
+                if src:
+                    dbm.upsert_mapping(c, tx["ledger_id"], tx["type"], src, body.category_id)
+        if body.account_id is not None:
+            c.execute("UPDATE transactions SET account_id=? WHERE id=?", (body.account_id, tid))
+        if body.refund_for is not None:
+            # 队列确认的退款关联与手动编辑同一套校验/口径（_link_refund），high=人工已核对
+            _link_refund(c, tid, body.refund_for, tx["amount"], confidence="high")
+        c.execute("UPDATE transactions SET need_confirm=0 WHERE id=?", (tid,))
+    _bump_rev()
+    return {"ok": True}
+
+# ---------- 统计 ----------
+
+@app.get("/api/stats/summary")
+def stats_summary(ledger: int, month: str):
+    return dbm.stats_summary(conn(), ledger, month)
+
+@app.get("/api/stats/calendar")
+def stats_calendar(ledger: int, month: str):
+    return dbm.stats_calendar(conn(), ledger, month)
+
+@app.get("/api/stats/category")
+def stats_category(ledger: int, month: str, type: str = "expense"):
+    return dbm.stats_category(conn(), ledger, month, type)
+
+@app.get("/api/stats/monthly")
+def stats_monthly(ledger: int, year: str):
+    try:
+        nxt = int(year) + 1
+    except ValueError:
+        raise HTTPException(400, "year 必须是数字年份（如 2026）")
+    return dbm.stats_trend(conn(), ledger, f"{year}-01-01", f"{nxt}-01-01")
+
+@app.get("/api/stats/yearly")
+def stats_yearly(ledger: int):
+    return dbm.stats_yearly(conn(), ledger)
+
+@app.get("/api/stats/trend")
+def stats_trend_range(ledger: int, _from: str = Query(..., alias="from"), to: str = ...):
+    """任意区间的按月趋势。"""
+    return dbm.stats_trend(conn(), ledger, _from, to)
+
+@app.get("/api/stats/range")
+def stats_range(ledger: int, _from: str = Query(..., alias="from"), to: str = ...):
+    return dbm.stats_summary_range(conn(), ledger, _from, to)
+
+@app.get("/api/stats/category-range")
+def stats_category_range(ledger: int, _from: str = Query(..., alias="from"), to: str = ...,
+                         type: str = "expense"):
+    return dbm.stats_category_range(conn(), ledger, _from, to, type)
+
+def _attribution_rows(ledger: int, _from: str, to: str) -> list[dict]:
+    """归属汇总：先按统计键、再按归属分组两级聚合。
+    有组的归属并成一行（person=组名，members=成员明细），无组按统计键单列。
+    统计页 /api/stats/attribution 与导出 xlsx 的「归属统计」sheet 共用。
+    _from/to 传空串表示不限制该端。"""
+    # App 手动/AI 记账（source=app，旧数据 manual）保持纯归属名——同一人手动与平台账单分列，符合「谁的哪个账」直觉
+    _PLAT = ("CASE t.source WHEN 'alipay' THEN '支付宝' WHEN 'wechat' THEN '微信' "
+             "WHEN 'jd' THEN '京东' WHEN 'meituan' THEN '美团' ELSE '' END")
+    _person = (f"json_extract(t.tags,'$.attribution') || "
+               f"CASE WHEN {_PLAT}='' THEN '' ELSE '·' || {_PLAT} END")
+    sql = (f"SELECT COALESCE(g.id, g2.id) AS gid, COALESCE(g.name, g2.name) AS group_name, "
+           f"{_person} AS person, COUNT(*) AS cnt, "
+           "SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END) AS expense, "
+           "SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END) AS income "
+           "FROM transactions t "
+           # 分组成员=归属名（非统计键）：剥平台后缀后查组，新导任一平台账单自动继承分组；
+           "LEFT JOIN attributions a ON a.ledger_id=t.ledger_id "
+           "AND a.name=json_extract(t.tags,'$.attribution') "
+           "LEFT JOIN attribution_groups g ON g.id=a.group_id "
+           "LEFT JOIN attribution_groups g2 ON g2.ledger_id=t.ledger_id "
+           "AND g2.name=json_extract(t.tags,'$.attribution') "
+           "WHERE t.ledger_id=? AND t.type IN ('expense','income') ")
+    args: list = [ledger]
+    frag, params = _date_where(_from, to)
+    sql += frag + " " + ("AND json_extract(t.tags,'$.attribution') IS NOT NULL "
+                         "AND TRIM(json_extract(t.tags,'$.attribution'))!='' "
+                         "GROUP BY g.id, person")
+    args += params
+    groups: dict[int, dict] = {}
+    plain: list[dict] = []
+    for r in conn().execute(sql, args):
+        row = {"person": r["person"], "cnt": r["cnt"], "expense": r["expense"], "income": r["income"]}
+        if r["gid"] is None:
+            row["group"] = False
+            plain.append(row)
+            continue
+        g = groups.setdefault(r["gid"], {"person": r["group_name"], "group": True,
+                                         "cnt": 0, "expense": 0, "income": 0, "members": []})
+        g["members"].append(row)
+        g["cnt"] += row["cnt"]
+        g["expense"] += row["expense"]
+        g["income"] += row["income"]
+    for g in groups.values():
+        g["members"].sort(key=lambda m: (m["expense"], m["income"]), reverse=True)
+    out = list(groups.values()) + plain
+    out.sort(key=lambda r: (r["expense"], r["income"]), reverse=True)
+    return out
+
+@app.get("/api/stats/attribution")
+def stats_attribution(ledger: int, _from: str = Query(..., alias="from"), to: str = ...):
+    return _attribution_rows(ledger, _from, to)
+
+@app.get("/api/stats/renqing")
+def stats_renqing(ledger: int):
+    """人情往来汇总：取数口径 = 分类「人情往来」，按流水名称分组。
+    given=我给出（支出）、received=我收到（收入），balance=given-received>0 即对方尚未还礼。
+    单条 GROUP BY 直接聚合（与 list_transactions 的 renqing_name 用同一套取数/分组表达式）。"""
+    rows = conn().execute(
+        f"SELECT {RENQING_NAME_SQL} AS person, "
+        "SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END) AS given, "
+        "SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END) AS received, "
+        "MAX(t.date) AS last "
+        "FROM transactions t "
+        f"WHERE t.ledger_id=? AND {_RENQING_CAT_SQL} "
+        f"GROUP BY {RENQING_NAME_SQL} "
+        "ORDER BY given - received DESC", (ledger, ledger)).fetchall()
+    return [{**dict(r), "balance": r["given"] - r["received"]} for r in rows]
+
+# ---------- 导入 / 导出 ----------
+
+MAX_UPLOAD = 20 * 1024 * 1024
+ALLOWED_EXT = (".csv", ".xlsx")
+
+def _upload_text(filename: str | None, data: bytes) -> str:
+    """上传文件 → CSV 文本（xlsx 首表转换 / CSV 解码）：模板试解析与向导嗅探共用。"""
+    return (ib._xlsx_to_csv(data) if (filename or "").lower().endswith(".xlsx")
+            else ib._decode_csv(data))
+
+def _upload_guard(filename: str | None, data: bytes) -> None:
+    """导入上传安全闸（防恶意文件）：扩展名白名单 + 大小上限 + xlsx 魔数校验。
+    行数熔断由 import_bill._capped（解析期）与本函数调用后的 len 校验（权威上限）接力。"""
+    fn = (filename or "").lower()
+    if not fn.endswith(ALLOWED_EXT):
+        raise HTTPException(400, "仅支持 .csv / .xlsx 文件")
+    if len(data) > MAX_UPLOAD:
+        raise HTTPException(400, "文件超过 20MB 上限")
+    if fn.endswith(".xlsx") and data[:2] != b"PK":
+        raise HTTPException(400, "文件内容不是有效 xlsx")
+
+@app.post("/api/import/parse")
+async def import_parse(ledger: int, file: UploadFile = File(...), use_ai: bool = True,
+                       template: str = Form("")):
+    _ledger_or_404(ledger)
+    data = await file.read()
+    _upload_guard(file.filename, data)
+    try:
+        if template:
+            # 向导"试解析"：未保存的临时模板直接解析（保存后走 parse_bill 自动分流）
+            tpl = json.loads(template)
+            if not (isinstance(tpl, dict) and tpl.get("headers") and tpl.get("col")):
+                raise ValueError("模板格式不完整")
+            text = _upload_text(file.filename, data)
+            flows = ib.parse_generic(text, tpl)
+        else:
+            flows = ib.parse_bill(data, file.filename)
+    except Exception as e:
+        raise HTTPException(400, f"解析失败: {e}")
+    if len(flows) > ib.MAX_PARSE_ROWS:
+        raise HTTPException(400, "行数超过上限 5 万行")
+    previews = ib.build_previews(conn(), ledger, flows)
+    if use_ai:
+        ai.resolve_subcategories_batch(previews, ledger)
+        ai.resolve_names_batch(previews)
+    n_dup = sum(1 for p in previews if p.get("duplicate"))
+    n_xdup = sum(1 for p in previews if p.get("pay_dupe"))
+    n_new = sum(1 for p in previews if ib._is_new_row(p))
+    return {"filename": file.filename, "total": len(previews), "new": n_new,
+            "duplicate": n_dup, "cross_dupe": n_xdup,
+            "skip": len(previews) - n_new - n_dup - n_xdup,
+            "need_confirm": sum(1 for p in previews if p.get("need_confirm") and not p.get("skip")),
+            "previews": previews}
+
+class ConfirmIn(BaseModel):
+    previews: list[dict]
+    filename: str
+    source: str
+    learn: bool = True
+
+@app.post("/api/import/confirm")
+def import_confirm(ledger: int, body: ConfirmIn):
+    _ledger_or_404(ledger)
+    batch_id = ib.apply_import(conn(), ledger, body.previews, body.filename, body.source, body.learn)
+    n = conn().execute("SELECT count FROM import_batches WHERE id=?", (batch_id,)).fetchone()[0]
+    with conn() as c:
+        group_names = {r["name"] for r in c.execute(
+            "SELECT name FROM attribution_groups WHERE ledger_id=?", (ledger,))}
+        for p in body.previews:
+            attr = ((p.get("tags") or {}).get("attribution") or "").strip()
+            if attr and attr not in group_names:
+                c.execute("INSERT OR IGNORE INTO attributions(ledger_id, name) VALUES(?,?)", (ledger, attr))
+    _bump_rev()
+    return {"batch_id": batch_id, "imported": n}
+
+@app.get("/api/import/batches")
+def list_batches(ledger: int):
+    return [dict(r) for r in conn().execute(
+        "SELECT * FROM import_batches WHERE ledger_id=? ORDER BY id DESC", (ledger,))]
+
+@app.delete("/api/import/batches/{batch_id}")
+def undo_import(batch_id: int):
+    n = ib.undo_batch(conn(), batch_id)
+    _bump_rev()
+    return {"deleted": n}
+
+# ---------- 通用模板向导（P1）：嗅探 + 模板 CRUD ----------
+
+@app.post("/api/import/sniff")
+async def import_sniff(file: UploadFile = File(...)):
+    """向导嗅探：表头定位 + 样例 + 列映射猜测（"无法识别"的文件从这里进入模板向导）。"""
+    data = await file.read()
+    _upload_guard(file.filename, data)
+    text = _upload_text(file.filename, data)
+    return ib.sniff_template(text)
+
+_TPL_FIELDS = ("date", "type", "name", "flow", "pay", "amount", "order", "merchant", "note")
+
+@app.get("/api/import/templates")
+def list_import_templates():
+    return config.load().get("import_templates") or []
+
+@app.post("/api/import/templates")
+def save_import_template(body: dict):
+    """新建/更新模板（按 name 覆盖）。最小校验 + 字段白名单（import_bill.user_templates 消费）。
+    白名单覆盖引擎全 schema：复制内置模板改列名/状态词存为自定义即接管路由（覆盖机制）。"""
+    name = str(body.get("name") or "").strip()
+    headers, col = body.get("headers"), body.get("col") or {}
+    if not name or not isinstance(headers, list) or not headers or not col:
+        raise HTTPException(400, "模板需要名称、表头列与列映射")
+    col = {k: v for k, v in col.items()
+           if k in set(_TPL_FIELDS) | {"to_account_name", "origin_source", "export_id", "export_ref"}
+           and v}
+    if "date" not in col or "amount" not in col:
+        raise HTTPException(400, "交易时间与金额两列必须映射")
+    rules = body.get("refund_rules")
+    if rules is not None:
+        if (not isinstance(rules, list)
+                or not all(isinstance(x, dict) and x.get("col") and x.get("op")
+                           and isinstance(x.get("values"), list) for x in rules)):
+            raise HTTPException(400, "refund_rules 格式不合法")
+        rules = [{"col": str(x["col"]), "op": str(x["op"]),
+                  "values": [str(v) for v in x["values"]],
+                  **({"contains_none": [str(v) for v in x["contains_none"]]}
+                     if x.get("contains_none") else {}),
+                  **({"guard": {"flow_not": str(x["guard"]["flow_not"])}}
+                     if isinstance(x.get("guard"), dict) and x["guard"].get("flow_not") else {})}
+                 for x in rules]
+    ttypes = body.get("transfer_types")
+    if ttypes is not None and not isinstance(ttypes, list):
+        raise HTTPException(400, "transfer_types 格式不合法")
+    nf = body.get("name_fallback")
+    if nf is not None:
+        if (not isinstance(nf, dict) or not isinstance(nf.get("cols"), list)):
+            raise HTTPException(400, "name_fallback 格式不合法")
+        nf = {"cols": [str(c) for c in nf["cols"]],
+              **({"generic_set": [str(s) for s in nf["generic_set"]]}
+                 if isinstance(nf.get("generic_set"), list) else {})}
+    rf = body.get("row_filter")
+    if rf is not None:
+        if not isinstance(rf, dict) or not rf.get("col") or not isinstance(rf.get("skip_in"), list):
+            raise HTTPException(400, "row_filter 格式不合法")
+        rf = {"col": str(rf["col"]), "skip_in": [str(s) for s in rf["skip_in"]]}
+    owner_re = str(body.get("owner_re") or "")
+    if owner_re:
+        try:
+            re.compile(owner_re)
+        except re.error:
+            raise HTTPException(400, "owner_re 不是合法正则")
+    cfg = config.load()
+    tpls = [t for t in (cfg.get("import_templates") or []) if t.get("name") != name]
+    t = {"id": "custom", "name": name, "headers": [str(h) for h in headers], "col": col,
+         "flow_map": {str(k): v for k, v in (body.get("flow_map") or {}).items()
+                      if v in ("expense", "income", "transfer")},
+         "refund_type": str(body.get("refund_type") or "").strip(),
+         "name_strip": [str(s) for s in (body.get("name_strip") or []) if s],
+         "owner": str(body.get("owner") or "").strip(),
+         "skip_first_n": int(body.get("skip_first_n") or 0)}
+    if rules is not None:
+        t["refund_rules"] = rules
+    if ttypes is not None:
+        t["transfer_types"] = [str(s) for s in ttypes]
+    if nf is not None:
+        t["name_fallback"] = nf
+    if rf is not None:
+        t["row_filter"] = rf
+    if body.get("hash_fields") is not None and isinstance(body["hash_fields"], list):
+        t["hash_fields"] = [str(s) for s in body["hash_fields"]]
+    for flag in ("expand", "two_pass", "note_fallback_last"):
+        if body.get(flag):
+            t[flag] = True
+    for key in ("pay_split", "attribution_col", "skip_zero_reason", "note_strip",
+                "amount_mode", "owner_re", "derive_base_as", "category_split"):
+        val = body.get(key)
+        if val:
+            t[key] = [str(s) for s in val] if key == "note_strip" else str(val)
+    tpls.append(t)
+    cfg["import_templates"] = tpls
+    config.save(cfg)
+    return {"ok": True}
+
+@app.delete("/api/import/templates/{name}")
+def delete_import_template(name: str):
+    cfg = config.load()
+    cfg["import_templates"] = [t for t in (cfg.get("import_templates") or []) if t.get("name") != name]
+    config.save(cfg)
+    return {"ok": True}
+
+def _csv_download_headers(ledger_id: int, ext: str = "csv") -> dict:
+    """导出文件名：chaimi-ledger-{账本名}-{导出日期}.{ext}；中文走 RFC 5987 filename*，
+    同时给 ASCII 回退（老浏览器丢弃中文名也不至于拿到空文件名）。"""
+    name = conn().execute("SELECT name FROM ledgers WHERE id=?", (ledger_id,)).fetchone()
+    stem = f"chaimi-ledger-{name['name'] if name else ledger_id}-{time.strftime('%Y%m%d')}"
+    quoted = quote(f"{stem}.{ext}")
+    return {"Content-Disposition": f"attachment; filename=ledger-{time.strftime('%Y%m%d')}.{ext}; filename*=UTF-8''{quoted}"}
+
+def _neut(v) -> str:
+    """公式注入中和（OWASP 惯例）：账单/用户可控文本以 = + - @ 或 TAB/CR 开头时前缀单引号，
+    防"导入恶意账单 → 导出 CSV/xlsx → Excel/WPS 打开"时单元格被当公式执行；
+    代价是此类开头的正常文本（如 -5折）导出带前导 '，Excel 显示时还原为原文。"""
+    s = str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
+def _export_table(rows, ledger_id: int) -> list:
+    """导出表（CSV/xlsx 共用）：14 列全量格式，流水卡片上的数据全列出。
+    金额保留分→元的换算由调用方格式化；交易名称=name（回落备注/分类，与卡片标题同口径）；
+    流水归属=解析后名字（有组显组名）；转账两端账户分「支付账户/收款账户」两列；
+    流水ID/退款关联——导出回环：导入时按 ID 直连退款对，无需重新匹配。
+    用户/账单可控的文本列一律 _neut 中和；日期/金额/ID 等本源列不涉及。"""
+    type_map = {"expense": "支出", "income": "收入", "transfer": "不计收支"}
+    cur_row = conn().execute("SELECT currency FROM ledgers WHERE id=?", (ledger_id,)).fetchone()
+    cur_code = (cur_row["currency"] if cur_row else None) or "CNY"
+    return [["交易时间", "交易名称", "交易金额", "币种", "流水类型", "支出类型/收入类型",
+             "支付账户", "收款账户", "小票", "流水归属", "备注", "订单号", "来源",
+             "流水ID", "退款关联"]] + [
+        [r["date"], _neut(r["name"] or r["note"] or r["category"] or ""), r["amount"] / 100, cur_code,
+         type_map[r["type"]], _neut(r["category"] or ""), _neut(r["account"] or ""), _neut(r["to_account"] or ""),
+         "", _neut(r["attr_display"] or ""), _neut(r["note"] or ""), _neut(r["order_no"] or ""), _neut(r["source"] or ""),
+         r["id"], r["refund_for"] or ""] for r in rows]
+
+@app.get("/api/receipts/export")
+def export_receipts(ledger: int, _from: str = Query("", alias="from"), to: str = ""):
+    """小票打包下载：按所选时间范围把流水带的小票打成 zip。
+    文件名 = 日期_交易名.jpeg（重名加交易 id 前缀）；范围/账本内无小票返回 404 提示。"""
+    sql = ("SELECT t.id, t.date, t.name, t.receipt_path FROM transactions t "
+           "WHERE t.ledger_id=? AND t.receipt_path IS NOT NULL AND t.receipt_path!=''")
+    frag, params = _date_where(_from, to, end="<=")
+    sql += frag
+    args: list = [ledger, *params]
+    rows = conn().execute(sql + " ORDER BY t.date", args).fetchall()
+    rdir = config.receipts_dir()
+    files = [(rdir / Path(r["receipt_path"]).name) for r in rows]
+    files = [f for f in files if f.is_file()]
+    if not files:
+        raise HTTPException(404, "所选范围内没有小票")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        used: set[str] = set()
+        for r, f in zip(rows, files):
+            if not f.is_file():
+                continue
+            safe = "".join(c for c in (r["name"] or "小票") if c not in '\\/:*?"<>|')[:30] or "小票"
+            name = f"{(r['date'] or '')[:10]}_{safe}{f.suffix}"
+            while name in used:   # 同日同名：加交易 id 防覆盖
+                name = f"{(r['date'] or '')[:10]}_{r['id']}_{safe}{f.suffix}"
+            used.add(name)
+            z.write(f, name)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition":
+                                      f'attachment; filename="receipts-{ledger}.zip"'})
+
+@app.get("/api/export")
+def export(ledger: int, _from: str = Query("", alias="from"), to: str = "", format: str = "json"):
+    sql = ("SELECT t.id, t.refund_for, t.date, t.type, t.amount, t.name, c.name AS category, "
+           "a.name AS account, a2.name AS to_account, t.note, "
+           "t.order_no, t.source, t.tags, " + _ATTR_DISPLAY + " "
+           "FROM transactions t "
+           "LEFT JOIN categories c ON t.category_id=c.id "
+           "LEFT JOIN accounts a ON t.account_id=a.id "
+           "LEFT JOIN accounts a2 ON t.to_account_id=a2.id "
+           + _ATTR_RESOLVE + "WHERE t.ledger_id=?")
+    frag, params = _date_where(_from, to, end="<")
+    sql += frag
+    args: list = [ledger, *params]
+    rows = conn().execute(sql + " ORDER BY t.date", args).fetchall()
+    if format in ("csv", "xlsx"):
+        table = _export_table(rows, ledger)
+        lg_row = conn().execute("SELECT name, currency FROM ledgers WHERE id=?", (ledger,)).fetchone()
+        range_txt = f"{_from} 至 {to}" if _from or to else "全部"
+        meta = [f"# 账本：{lg_row['name'] if lg_row else ledger}",
+                f"# 币种：{(lg_row['currency'] if lg_row else None) or 'CNY'}",
+                f"# 导出范围：{range_txt}",
+                f"# 导出时间：{time.strftime('%Y-%m-%d %H:%M')}",
+                f"# 流水笔数：{len(rows)}"]
+        meta_rows = [[m] for m in meta] + [[]]   # 每条说明一行单格 + 空行（csv.writer/ws.append 对字符串会逐字符迭代，必须包成列表）
+        if format == "csv":
+            # 文本格式金额需自带两位小数
+            for row in table[1:]:
+                row[2] = f"{row[2]:.2f}"
+            buf = io.StringIO()
+            csv.writer(buf).writerows(meta_rows + table)
+            return StreamingResponse(iter([("\ufeff" + buf.getvalue()).encode("utf-8")]),
+                                     media_type="text/csv",
+                                     headers=_csv_download_headers(ledger))
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "流水"
+        for row in meta_rows + table:
+            ws.append(row)
+        ws.column_dimensions["A"].width = 12   # 日期列宽，避免 2026-09-01 显示成 ####
+        ws2 = wb.create_sheet("归属统计")
+        ws2.append(["流水归属", "笔数", "支出", "收入", "包含归属"])
+        for r in _attribution_rows(ledger, _from, _to_end(to) if to else ""):
+            ws2.append([_neut(r["person"]), r["cnt"], r["expense"] / 100, r["income"] / 100,
+                        _neut("、".join(m["person"] for m in r.get("members", [])))])
+        buf = io.BytesIO()
+        wb.save(buf)
+        return StreamingResponse(iter([buf.getvalue()]),
+                                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                 headers=_csv_download_headers(ledger, "xlsx"))
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["amount"] = d["amount"] / 100
+        items.append(d)
+    return JSONResponse(items)
+
+# ---------- 映射配置 ----------
+
+class MappingIn(BaseModel):
+    flow_type: str
+    source: str
+    category_id: int
+
+@app.get("/api/mappings")
+def list_mappings(ledger: int):
+    return [dict(r) for r in conn().execute(
+        "SELECT m.id, m.flow_type, m.source, m.category_id, m.learned, c.name AS target "
+        "FROM category_mappings m JOIN categories c ON m.category_id=c.id "
+        "WHERE m.ledger_id=? ORDER BY m.source", (ledger,))]
+
+@app.post("/api/mappings")
+def create_mapping(ledger: int, body: MappingIn):
+    """v6：目标必须是已存在的分类（category_id 外键），悬空映射从结构上不可能。"""
+    if not dbm.top_cat_by_id(conn(), ledger, body.category_id):
+        raise HTTPException(400, "目标分类不存在或不属于当前账本")
+    with conn() as c:
+        c.execute(
+            "INSERT OR REPLACE INTO category_mappings(ledger_id, flow_type, source, category_id) VALUES(?,?,?,?)",
+            (ledger, body.flow_type, body.source.strip(), body.category_id))
+    return {"ok": True}
+
+@app.delete("/api/mappings/{mid}")
+def delete_mapping(mid: int):
+    with conn() as c:
+        c.execute("DELETE FROM category_mappings WHERE id=?", (mid,))
+    return {"ok": True}
+
+@app.put("/api/mappings/{mid}")
+def update_mapping(mid: int, body: dict):
+    """编辑模式改名：只改本条映射的匹配词；目标 = 分类本身（改名走分类接口，外键自动联动）。"""
+    source = (body.get("source") or "").strip()
+    if not source:
+        raise HTTPException(400, "无可更新字段")
+    with conn() as c:
+        c.execute("UPDATE category_mappings SET source=? WHERE id=?", (source[:60], mid))
+    return {"ok": True}
+
+# ---------- 备份 ----------
+
+@app.post("/api/backup")
+def do_backup():
+    return backup.create_backup()
+
+@app.get("/api/backups")
+def get_backups():
+    return backup.list_backups()
+
+def _backup_call(op, name: str) -> None:
+    """备份操作（restore/delete）公共异常映射：文件名非法/非数据库/不存在统一 400。"""
+    try:
+        op(name)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(400, str(e))
+
+@app.post("/api/restore")
+def do_restore(body: dict):
+    _backup_call(backup.restore_backup, body.get("file", ""))
+    dbm.init_db()
+    return {"ok": True}
+
+@app.post("/api/backups/delete")
+def backup_delete(body: dict):
+    _backup_call(backup.delete_backup, body.get("file", ""))
+    return {"ok": True}
+
+@app.get("/api/backups/download")
+def backup_download(file: str = Query(...)):
+    """下载备份文件到本地（文件名校验同 restore）。"""
+    try:
+        p = backup._locate(file)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(404 if "不存在" in str(e) else 400, str(e))
+    return FileResponse(p, filename=file)
+
+@app.get("/api/logs/download")
+def logs_download():
+    """日志收集打包下载（参考 liuku）：运行日志 + 飞牛安装日志，ZIP 内存打包。"""
+    sources: list[tuple[str, Path]] = []          # (zip内路径, 源文件)
+    sources.append(("app/chaimi-ledger.log", config.log_path()))   # applog 轮转文件（本地开发也有）
+    if config.TRIM_PKGVAR:
+        sources.append(("run/info.log", Path(config.TRIM_PKGVAR) / "info.log"))
+    for p in sorted(Path("/var/log/apps").glob("chaimi-ledger*")):
+        sources.append((f"varlog/{p.name}", p))
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        manifest = (
+            f"chaimi-ledger 日志包\n"
+            f"时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"TRIM_PKGVAR: {config.TRIM_PKGVAR or '(本地开发)'}\n"
+            f"收集文件数: {sum(1 for _, p in sources if p.is_file())}\n"
+            "run/=运行日志 varlog/=飞牛捕获的安装日志\n"
+        )
+        zf.writestr("manifest.txt", manifest)
+        for rel, p in sources:
+            if p.is_file():
+                try:
+                    # 二进制原样入包：read_text 会把轮转的 *.gz 压缩内容按 UTF-8 读坏成乱码
+                    zf.writestr(rel, p.read_bytes())
+                except OSError:
+                    pass
+    name = f"chaimi-ledger-logs-{time.strftime('%Y%m%d-%H%M%S')}.zip"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={name}"},
+    )
+
+# ---------- 配置 ----------
+
+@app.get("/api/llm/models")
+def get_llm_models():
+    """设置页「模型列表」：服务商 /models 按 文本/视觉 分组（可失败，error 带说明）"""
+    return ai.list_models_grouped()
+
+def _mask(d: dict, *keys: str) -> None:
+    """凭证字段就地掩码（明文只存 chaimi.conf 与备份副本，出接口一律 ***）。"""
+    for k in keys:
+        if d.get(k):
+            d[k] = "***"
+
+@app.get("/api/config")
+def get_config():
+    cfg = config.load()
+    _mask(cfg["llm"], "api_key", "vl_api_key")
+    bot = cfg.get("bot") or {}
+    _mask(bot, "api_token")
+    # A 通道凭证同口径掩码；兼容旧版单 dict 与列表两种形态
+    ilink = bot.get("ilink")
+    for e in ([ilink] if isinstance(ilink, dict) else (ilink or [])):
+        if isinstance(e, dict):
+            _mask(e, "token")
+    _mask(cfg.get("web_auth") or {}, "password")
+    return cfg
+
+_LLM_KEYS = ("base_url", "model", "vl_model", "api_key", "vl_base_url", "vl_api_key")
+
+def _cfg_int(b: dict, old: dict, key: str, lo: int, hi: int) -> int:
+    """配置数字字段钳制（backup/bot 共用）：越界截断，非数字 400。"""
+    try:
+        return max(lo, min(hi, int(b.get(key, old[key]))))
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{key} 必须是数字")
+
+@app.put("/api/config")
+def put_config(body: dict):
+    cfg = config.load()
+    for k, v in (body.get("llm") or {}).items():
+        if k not in _LLM_KEYS:   # 白名单外的键不落盘（防任意键注入配置文件）
+            continue
+        if k in ("api_key", "vl_api_key") and v == "***":
+            continue
+        cfg["llm"][k] = v
+    if "theme" in body:
+        cfg["theme"] = body["theme"]
+    if isinstance(body.get("backup"), dict):
+        b, old = body["backup"], cfg["backup"]
+        old.pop("keep", None)  # 清掉旧版字段
+        old["enabled"] = bool(b.get("enabled", old["enabled"]))
+        old["hour"] = _cfg_int(b, old, "hour", 0, 23)
+        old["keep_months"] = _cfg_int(b, old, "keep_months", 0, 480)
+        old["keep_years"] = _cfg_int(b, old, "keep_years", 0, 100)
+    if isinstance(body.get("bot"), dict):
+        b = body["bot"]
+        old = cfg.setdefault("bot", {})
+        if b.get("mode") in ("off", "direct", "gateway"):
+            old["mode"] = b["mode"]
+        if b.get("default_ledger") is not None:
+            try:
+                old["default_ledger"] = int(b["default_ledger"])
+            except (TypeError, ValueError):
+                raise HTTPException(400, "default_ledger 必须是数字")
+        for key in ("allowed_users", "gateway_users"):   # 网关白名单独立保存(默认 ["gateway"])
+            if isinstance(b.get(key), list):
+                old[key] = [str(x).strip() for x in b[key] if str(x).strip()]
+        if isinstance(b.get("api_token"), str) and b["api_token"] != "***":
+            old["api_token"] = b["api_token"].strip()
+    config.save(cfg)
+    _bot_apply()   # 热切换（6.2）：direct 启停轮询线程 / gateway 放行 API / off 全停
+    return {"ok": True}
+
+# ---------- AI ----------
+
+class AiParseIn(BaseModel):
+    text: str
+
+@app.post("/api/ai/parse")
+def ai_parse(ledger: int, body: AiParseIn):
+    return ai.parse_booking(body.text, ledger, date.today().strftime("%Y-%m-%d"))
+
+async def _save_receipt(file: UploadFile) -> tuple[Path, str]:
+    """上传小票落盘（/api/ai/receipt 与 /api/bot/receipt 共用）：魔数校验 + 裁剪压缩 + 时间戳随机名。
+    process_receipt 原地覆写：裁掉桌面留白 + 缩至 1080px + JPEG 85（典型 3MB→200KB）。"""
+    data = await file.read()
+    if not bot_core.is_image(data):
+        raise HTTPException(400, "小票仅支持 JPG / PNG / WEBP 图片")
+    d = config.receipts_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    fname = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}.jpg"
+    p = d / fname
+    p.write_bytes(data)
+    bot_core.process_receipt(p)   # 裁剪+压缩（失败保留原图，不阻断）
+    return p, f"receipts/{fname}"
+
+@app.post("/api/ai/receipt")
+async def ai_receipt(ledger: int, file: UploadFile = File(...)):
+    path, rp = await _save_receipt(file)
+    result = ai.parse_receipt(str(path))
+    if result.get("error"):
+        path.unlink(missing_ok=True)   # 识别失败：前端只显错误不保留图片，删文件防孤儿
+        return result
+    result["receipt_path"] = rp
+    return result
+
+@app.delete("/api/receipts/discard")
+def discard_receipt(path: str):
+    """App 取消记账/删空卡片/关闭弹窗时清未入库小票（前端 fire-and-forget 调用）。
+    只删无流水引用的文件——已入库或别笔在用的一律不动，误调无副作用。"""
+    name = Path(path or "").name
+    if not name or ".." in path:
+        raise HTTPException(400, "无效路径")
+    row = conn().execute("SELECT 1 FROM transactions WHERE receipt_path IN (?, ?) LIMIT 1",
+                         (name, f"receipts/{name}")).fetchone()
+    if row:
+        return {"ok": True, "deleted": False}
+    p = config.receipts_dir() / name
+    if not p.is_file():
+        return {"ok": True, "deleted": False}
+    try:
+        p.unlink()
+    except OSError:
+        return {"ok": True, "deleted": False}
+    log.info(f"App 取消清理小票: {name}")
+    return {"ok": True, "deleted": True}
+
+def sweep_orphan_receipts(grace_hours: int = 24) -> int:
+    """小票孤儿文件兜底清理：无任何流水引用且超过宽限期的图片删除。
+    覆盖 App 取消时断网/关页面等收不到显式 discard 的场景（顺带清历史遗留）；
+    宽限期 24h 远大于在途草稿存续（机器人 30min TTL、App 卡片随页面存亡），
+    只扫图片后缀、只扫一层目录。"""
+    rdir = config.receipts_dir()
+    if not rdir.is_dir():
+        return 0
+    used = {Path(r["receipt_path"]).name for r in conn().execute(
+        "SELECT receipt_path FROM transactions WHERE receipt_path IS NOT NULL AND receipt_path!=''")}
+    cutoff = time.time() - grace_hours * 3600
+    n = 0
+    for p in rdir.iterdir():
+        if (p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png")
+                and p.name not in used and p.stat().st_mtime < cutoff):
+            try:
+                p.unlink()
+                n += 1
+            except OSError:
+                pass
+    if n:
+        log.info(f"兜底清理 {n} 个无引用小票文件")
+    return n
+
+@app.get("/api/ai/analyze")
+def ai_analyze(ledger: int, month: str):
+    return StreamingResponse(ai.sse_stream(ai.monthly_analysis(ledger, month)),
+                             media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+@app.get("/api/ai/chat")
+def ai_chat(ledger: int, q: str):
+    return StreamingResponse(ai.sse_stream(ai.chat(q, ledger)),
+                             media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+# ---------- 静态资源（小票图） ----------
+
+@app.get("/receipts/{name}")
+def get_receipt(name: str):
+    _safe_name(name)
+    p = config.receipts_dir() / name
+    if not p.exists():
+        raise HTTPException(404)
+    # 三层禁缓存：浏览器/WebView + fnOS 网关(nginx) + 代理——裁剪覆写后任何端必须取新图
+    return FileResponse(p, headers={
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "X-Accel-Expires": "0",       # nginx proxy_cache 不缓存此响应
+        "Pragma": "no-cache",
+    })
+
+@app.post("/api/receipts/crop")
+def crop_receipt(path: str = Query(...), body: dict = None):
+    """手动裁剪小票（viewReceipt → ✂️）：Pillow 原地裁剪 + JPEG 85 覆写。"""
+    name = Path(path or "").name
+    if not name:
+        raise HTTPException(400, "无效路径")   # Path("..").name == "" 已拦截穿越
+    p = config.receipts_dir() / name
+    if not p.is_file():
+        raise HTTPException(404, "小票不存在")
+    body = body or {}
+    x, y = max(0, int(body.get("x") or 0)), max(0, int(body.get("y") or 0))
+    w, h = int(body.get("w") or 0), int(body.get("h") or 0)
+    if w < 10 or h < 10:
+        raise HTTPException(400, "裁剪区域太小")
+    try:
+        from PIL import Image
+        img = Image.open(p)
+        w, h = min(w, img.size[0] - x), min(h, img.size[1] - y)
+        if w < 10 or h < 10:
+            raise HTTPException(400, "裁剪区域超出图片范围")
+        img.crop((x, y, x + w, y + h)).save(p, "JPEG", quality=85)
+        return {"ok": True, "size": [w, h]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"裁剪失败: {e}")
+
+class BotMsgIn(BaseModel):
+    text: str = ""
+    user: str = "gateway"
+
+def _ct_eq(a: str, b: str) -> bool:
+    """常量时间字符串比较（Token/Basic Auth 共用）：非 ASCII 输入判失败而非抛异常。"""
+    try:
+        return secrets.compare_digest(a, b)
+    except (TypeError, UnicodeError):
+        return False
+
+def _token_ok(authorization: str, token: str) -> bool:
+    """常量时间 Bearer 校验（评估 R-08）：逐字节比较不随匹配长度泄漏时序。"""
+    return authorization.startswith("Bearer ") and _ct_eq(authorization, f"Bearer {token}")
+
+def _bot_guard(authorization: str) -> None:
+    """B 通道双门：mode=gateway 才放行 + Bearer Token 校验（设置页生成/重置）。"""
+    cfg = _bot_cfg()
+    if cfg.get("mode") != "gateway":
+        raise HTTPException(403, "机器人未启用网关模式（App 设置→微信机器人）")
+    token = cfg.get("api_token") or ""
+    if not token or not _token_ok(authorization, token):
+        raise HTTPException(401, "Token 无效（设置→微信机器人→生成 Token）")
+
+@app.post("/api/bot/message")
+def bot_message(body: BotMsgIn, request: Request):
+    """外部网关（OpenClaw/Hermes 等）→ bot_core。同步接口：LLM 解析 2~10s、
+    查账多轮可 20s+，网关侧技能调用超时建议 120s。"""
+    _bot_guard(request.headers.get("authorization") or "")
+    return {"reply": bot_core.handle(body.text, body.user or "gateway")}
+
+@app.post("/api/bot/receipt")
+async def bot_receipt(request: Request, file: UploadFile = File(...), user: str = "gateway"):
+    """小票图片 → bot_core（开草稿/追加）。与 /api/ai/receipt 同款落盘，走 bot 链路。"""
+    _bot_guard(request.headers.get("authorization") or "")
+    path, rp = await _save_receipt(file)
+    reply = bot_core.handle("", user, image_path=str(path))
+    out = {"reply": reply}
+    if path.exists():   # 识别失败时 _receipt 已清理文件，不再回传失效路径
+        out["receipt_path"] = rp
+    return out
+
+@app.get("/api/bot/status")
+def bot_status(user: str = "gateway"):
+    """面板 / MCP 共用：模式与草稿态（不含敏感字段）。"""
+    return bot_core.status(user)
+
+@app.post("/api/bot/test")
+def bot_test(body: BotMsgIn):
+    """设置页「测试」按钮：面板上下文直调 bot_core（bypass_auth，不耗 Token）;
+    """
+    return {"reply": bot_core.handle(body.text, "_panel", bypass_auth=True)}
+
+@app.get("/api/rev/wait")
+def rev_wait(since: int = -1, hold: int = 25):
+    """长轮询(方案B,替代被飞牛网关掐杀的 SSE 无限流):挂住直到 rev 偏离 since
+    或 hold 秒超时再返回;不带 since 立即返回当前值(首轮立基线)。每个请求时长有限
+    (<60s 网关掐杀线),缓冲网关下照常送达——与 AI 聊天流可用同理。前端循环调用,
+    变更后 1s 内刷新。"""
+    deadline = time.time() + max(1, min(hold, 30))
+    while time.time() < deadline:
+        if _REV["n"] != since:
+            break
+        _REV_EV.wait(timeout=max(0.1, deadline - time.time()))
+        _REV_EV.clear()
+    return {"rev": _REV["n"]}
+
+@app.post("/api/bot/token")
+def bot_token():
+    """生成/重置 B 通道 Token（明文仅此一次返回；GET /api/config 回显掩码）。"""
+    cfg = config.load()
+    cfg.setdefault("bot", {})["api_token"] = secrets.token_hex(16)
+    config.save(cfg)
+    return {"token": cfg["bot"]["api_token"]}
+
+# ---------- 通道 A：iLink 直连（DESIGN 10.3） ----------
+
+def _ilink_on_confirmed(bot, creds: dict) -> None:
+    """扫码成功(十章):凭证落 chaimi.conf,扫码人自动进白名单(身份即授权);
+    实例转正交 manager.adopt。平台规则:一个微信号对同一 bot 应用只有一条
+    绑定,扫新码会顶替旧绑定——同 user 旧凭证一律删除,apply 差量停旧实例
+    (防僵尸轮询)。"""
+    ledger = bot._ledger or 1
+    label = bot._label or ""
+    user = creds.get("ilink_user_id") or ""
+    cfg = config.load()
+    bot_cfg = cfg.setdefault("bot", {})
+    entries = [e for e in bot_ilink.ilink_entries(cfg)
+               if not user or e.get("user") != user]   # 同微信仅留最新绑定
+    entries.append({"account_id": creds.get("ilink_bot_id") or "",
+                    "token": creds.get("bot_token") or "",
+                    "base_url": creds.get("baseurl") or "",
+                    "user": user, "ledger": ledger, "label": label})
+    bot_cfg["ilink"] = entries
+    allowed = bot_cfg.setdefault("allowed_users", [])
+    if user and user not in allowed:
+        allowed.append(user)
+    config.save(cfg)
+    # 出口闸(与 qrcode 入口闸成对):扫码悬在半路时模式被切走,只存凭证不启动实例,
+    # 切回 direct 后 _bot_apply 按凭证自动拉起,免重扫
+    if bot_cfg.get("mode") == "direct":
+        _ilink.adopt(bot)
+        _ilink.apply(entries)
+
+@app.post("/api/bot/ilink/qrcode")
+def bot_ilink_qrcode(body: dict):
+    """按账本发起扫码(DESIGN 10.6):{ledger, label}——扫哪个账本的码记哪本。"""
+    # 入口闸:直连未开启不发票,网关/关闭模式下扫码无意义(回调还有出口闸兜底)
+    if _bot_cfg().get("mode") != "direct":
+        raise HTTPException(400, "直连未开启：请先把模式切到「直连」再扫码")
+    try:
+        ledger = int(body.get("ledger") or 1)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "ledger 必须是数字")
+    label = str(body.get("label") or "")[:20]
+    try:
+        return _ilink.begin_login(ledger, label, "", _ilink_on_confirmed)
+    except Exception as e:
+        raise HTTPException(502, f"获取二维码失败：{e}")
+
+@app.get("/api/bot/ilink/status")
+def bot_ilink_status():
+    """直连聚合状态:待扫码态 + 各成员实例状态(多人记账)。"""
+    return {"mode": _bot_cfg().get("mode", "off"),
+            "pending": _ilink.pending(), "bots": _ilink.states()}
+
+@app.post("/api/bot/ilink/unbind")
+def bot_ilink_unbind(body: dict):
+    """解绑成员:停实例 + 删凭证(白名单保守不动,孤儿 id 无害)。"""
+    aid = str(body.get("account_id") or "")
+    if not aid:
+        raise HTTPException(400, "account_id 必填")
+    cfg = config.load()
+    bot_cfg = cfg.setdefault("bot", {})
+    bot_cfg["ilink"] = [e for e in bot_ilink.ilink_entries(cfg)
+                        if str(e.get("account_id")) != aid]
+    config.save(cfg)
+    _bot_apply()
+    return {"ok": True}
+
+@app.get("/api/bot/ilink/qrimg")
+def bot_ilink_qrimg():
+    """二维码图片：qrcode_img_content 是「待编码的跳转 URL」
+    （https://liteapp.weixin.qq.com/q/...?qrcode=...&bot_type=3）——
+    服务端用 segno 把 URL 生成 PNG（同源回图，无混合内容/防盗链问题）。"""
+    import io
+    img = _ilink.qr_img()
+    if not img:
+        raise HTTPException(404, "尚未发起扫码登录")
+    if not img.startswith(("http://", "https://")):
+        raise HTTPException(502, f"无法识别的二维码内容: {img[:60]}")
+    try:
+        import segno
+    except ImportError:
+        raise HTTPException(503, "缺 segno 依赖（requirements.txt 升级后重装应用）")
+    buf = io.BytesIO()
+    segno.make(img, error="m").save(buf, kind="png", scale=8, border=2)
+    return Response(buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "no-cache"})
+
+_SIDECAR: dict = {"server": None}   # 当前 sidecar 实例（None=未启动）；should_exit 置位即优雅退出
+
+def _sidecar_run(srv) -> None:
+    """线程体：独立线程隔离（失败只损失直连不影响主服务）；退出后注销实例。"""
+    try:
+        srv.run()
+    except Exception as e:   # noqa: BLE001 - sidecar 任何失败都不许拖垮主服务
+        log.warning(f"tcp-sidecar 启动失败（忽略，B 通道直连不可用）: {e}")
+    finally:
+        if _SIDECAR["server"] is srv:
+            _SIDECAR["server"] = None
+
+def _sidecar_apply() -> None:
+    """B 通道 TCP 直连（与 UDS 并行，DESIGN 10.4）——飞牛部署只有 Unix socket，
+    容器/外部进程（OpenClaw 的 MCP/REST）走 HTTP 进不来，需要一条不经飞牛网关的 TCP 通道。
+    随 bot.mode 差量启停（_bot_apply 调用，与轮询线程/网关开关同一条热切换链）：
+    gateway=按 CHAIMI_BOT_BIND/CHAIMI_BOT_PORT 监听（默认 127.0.0.1:18710）；其余模式优雅停。
+    lifespan=off：启动钩子由 UDS 主服务独跑不重复；端口独立于 --port（本地开发主服务口）。"""
+    want = _bot_cfg().get("mode") == "gateway"
+    bind = os.environ.get("CHAIMI_BOT_BIND", "127.0.0.1")
+    if bind.lower() in ("off", "", "0"):
+        return
+    srv = _SIDECAR["server"]
+    if want and srv is None:
+        # log_config=None：sidecar 不重配进程级 uvicorn logger——否则其 warning 级配置
+        # 会把主服务的访问日志（INFO）一并静默（真机 10-13 实测：热切网关后 info.log 失明）
+        srv = uvicorn.Server(uvicorn.Config(
+            app, host=bind, port=int(os.environ.get("CHAIMI_BOT_PORT", "18710")),
+            lifespan="off", log_config=None))
+        _SIDECAR["server"] = srv   # 先登记再起线程：快速切换时防重复启动
+        log.info(f"tcp-sidecar 监听 {bind}:{srv.config.port}（网关模式）")
+        threading.Thread(target=_sidecar_run, args=(srv,), daemon=True, name="tcp-sidecar").start()
+    elif not want and srv is not None:
+        srv.should_exit = True   # uvicorn serve 循环检查位：优雅退出
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--uds")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=18710)
+    args = ap.parse_args()
+    if args.uds:
+        # B 通道 TCP 直连由 _startup→_bot_apply→_sidecar_apply 按 bot.mode 差量启停（仅 gateway 监听）
+        uvicorn.run(app, uds=args.uds, log_level="info")
+    else:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")

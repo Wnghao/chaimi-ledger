@@ -1,0 +1,392 @@
+:root{
+  /* ===== 全局中性 ===== */
+  --bg:#F7F8FB;          /* 整页底色——比纯白更柔和 */
+  --bg-2:#EDEFF5;        /* 二级底色 */
+  --card:#FFFFFF;        /* 卡片底色 */
+  --fg:#1F2433;          /* 主文字——深蓝灰，4.7:1 对比度 */
+  --muted:#6E7686;
+  --border:#E8EBF3;      /* 通用边框 */
+  --chip:#F1F3F8;        /* 标签/小元素底 */
+  --hover:#F4F6FB;       /* hover 高亮 */
+  --hover-2:#EFF2F8;     /* 较强 hover */
+  --mask:rgba(31,36,51,.45);   /* 弹窗遮罩（modal-mask 与退款下拉共用） */
+  --sb-thumb:rgba(31,36,51,.25);        /* 滚动条滑块（悬浮式，仅 hover 提亮） */
+  --sb-thumb-hover:rgba(31,36,51,.45);
+  color-scheme:light;
+
+  /* ===== 三级阴影 ===== */
+  --shadow:0 1px 2px rgba(31,36,51,.04), 0 4px 16px rgba(31,36,51,.05);
+  --shadow-md:0 2px 8px rgba(31,36,51,.06), 0 8px 24px rgba(31,36,51,.08);
+  --shadow-lg:0 4px 16px rgba(31,36,51,.08), 0 16px 48px rgba(31,36,51,.12);
+
+  /* ===== 圆角（大圆角，整体更柔和） ===== */
+  --radius:18px;          /* 卡片 */
+  --radius-lg:22px;        /* 容器/弹窗 */
+  --radius-sm:12px;        /* 按钮/输入框 */
+  --radius-pill:999px;     /* chip/avatar 全圆 */
+
+  /* ===== 马卡龙 8 色系（每个功能模块一个独立色相）=====
+     每系 5 级：bg50(填充) → bg100(底) → border(边) → primary(图标/按钮) → fg(文字)
+     与 nav-item data-p 映射：ai→purple / list→blue / cal→mint / stats→peach
+                           / renqing→pink / chat→teal / settings→gray / io→butter */
+  --m-purple-50:#F3EEFE;  --m-purple-100:#E5D9FA;  --m-purple-bd:#CFB8F0;  --m-purple:#9B7FE8;  --m-purple-fg:#6B4FB8;
+  --m-blue-50:#EAF2FC;    --m-blue-100:#D2E2F8;    --m-blue-bd:#A8C5EC;    --m-blue:#5A9DE6;    --m-blue-fg:#2E6FB8;
+  --m-mint-50:#E6F6EE;    --m-mint-100:#C9EBD7;    --m-mint-bd:#95D6B0;    --m-mint:#5DBF8A;    --m-mint-fg:#2F8B5E;
+  --m-peach-50:#FDF0E5;   --m-peach-100:#FADCC2;   --m-peach-bd:#F4B98A;   --m-peach:#E8956B;   --m-peach-fg:#B5663E;
+  --m-pink-50:#FBEBF0;    --m-pink-100:#F5C9D6;    --m-pink-bd:#EDA0B5;    --m-pink:#E8869F;    --m-pink-fg:#B84766;
+  --m-teal-50:#E5F4F2;    --m-teal-100:#C0E4DF;    --m-teal-bd:#88CABE;    --m-teal:#5BBFAA;    --m-teal-fg:#2E8675;
+  --m-gray-50:#EEEEF1;    --m-gray-100:#DCDfe8;    --m-gray-bd:#B8BDC9;    --m-gray:#787A88;    --m-gray-fg:#494B58;
+  --m-butter-50:#FBF5E0;  --m-butter-100:#F4E5B0;  --m-butter-bd:#E5CC74;  --m-butter:#D9B85A;  --m-butter-fg:#9C7E2E;
+
+  /* ===== 默认主色（保持向后兼容，指向流水蓝色系）===== */
+  --primary:var(--m-blue);         /* 主按钮主色 */
+  --primary-2:var(--m-blue-bd);    /* 主按钮 hover/border */
+  --primary-bg:var(--m-blue-100);  /* 主按钮按下/填充态 */
+  --primary-fg:var(--m-blue-fg);   /* 主按钮文字 */
+  --on-primary:#FFFFFF;
+
+  /* ===== 固定语义色（收支/待确认——保留对比度，不参与色系轮换）===== */
+  --expense:#D0404F;
+  --expense-bg:#FDEBEC;
+  --income:#23855A;
+  --income-bg:#E8F6EE;
+  --pending:#E8B845;       /* 待确认——暖黄 */
+  --pending-bg:#FDF6E0;
+  --transfer:#787A88;      /* 转账——莫兰迪灰 */
+  --neutral:#A0A4B0;
+  --neutral-bg:#EEEEF1;
+
+  /* ===== 日历热力（薄荷蓝绿 4 档，与 cal 图标 #5DBF8A 同源，4 档 lightness 阶梯） ===== */
+  --cal-heat-1:#E6F4EE;        /* 极淡薄荷（最低支出，与 cal 图标同源） */
+  --cal-heat-2:#C8E5DA;        /* 淡薄荷（低支出） */
+  --cal-heat-3:#9BD0BC;        /* 中薄荷（中支出） */
+  --cal-heat-4:#5DBF8A;        /* 主薄荷绿（最高支出，= cal 图标色） */
+  --cal-inc-bg:#EAF4F8;        /* 收入日专用底色（极淡天蓝，区分收支视觉） */
+
+  --cal-amt-e1:#D0404F; --cal-amt-i1:#23855A;
+  --cal-amt-e2:#A32A38; --cal-amt-i2:#14603C;
+  --cal-amt-e3:#7A1F2B; --cal-amt-i3:#0B3D27;
+}
+[data-theme="dark"]{
+  --bg:#0F172A; --bg-2:#1E293B; --card:#1A2236; --fg:#E8ECF4; --muted:#8A93A8;
+  --border:rgba(255,255,255,.04); --hover:rgba(255,255,255,.05); --hover-2:rgba(255,255,255,.09);
+  --chip:#252C40; --pending-bg:rgba(217,162,80,.16);
+  /* 滚动条：深底上用低透明度白，弱化存在感，hover 才提亮 */
+  --sb-thumb:rgba(255,255,255,.16); --sb-thumb-hover:rgba(255,255,255,.32);
+  color-scheme:dark;
+  /* 深色模式马卡龙色系：
+     50 = 极淡色相底（用于 box-shadow 光晕/虚线区底）
+     100 = 浅色底（用于 nav-item.on 背景/按钮底，可与 card 区分）
+     bd = 中等亮度边框/左边条
+     primary = 主色（图标/按钮主色，柔和不过亮）
+     fg = 文字色（中等亮度，避免在深色上刺眼）*/
+  --m-purple-50:#2A2049;  --m-purple-100:#3D3068;  --m-purple-bd:#7C66B5;  --m-purple:#A88AE0;  --m-purple-fg:#C9B8E8;
+  --m-blue-50:#1B2A40;    --m-blue-100:#293B58;   --m-blue-bd:#5A86B8;    --m-blue:#76ACE0;    --m-blue-fg:#A6C2E0;
+  --m-mint-50:#1A302A;    --m-mint-100:#264739;   --m-mint-bd:#5DA37E;    --m-mint:#7ACFA0;    --m-mint-fg:#A4D8BC;
+  --m-peach-50:#3D2818;   --m-peach-100:#553A26;  --m-peach-bd:#B5794E;   --m-peach:#E09872;   --m-peach-fg:#E5B295;
+  --m-pink-50:#3B222D;    --m-pink-100:#553344;   --m-pink-bd:#B56684;    --m-pink:#DC8AA8;    --m-pink-fg:#E5A8BD;
+  --m-teal-50:#1A2F2C;    --m-teal-100:#264842;   --m-teal-bd:#5BA698;    --m-teal:#7ACEB8;    --m-teal-fg:#A4D8CC;
+  --m-gray-50:#1F222B;    --m-gray-100:#2C303B;   --m-gray-bd:#5F6373;    --m-gray:#8E93A2;    --m-gray-fg:#B5BAC8;
+  --m-butter-50:#34291A;  --m-butter-100:#4D3D24; --m-butter-bd:#B58F38;  --m-butter:#D9B040;  --m-butter-fg:#E5C870;
+  --primary:var(--m-blue); --primary-2:var(--m-blue-bd); --primary-bg:var(--m-blue-100); --primary-fg:var(--m-blue-fg);
+  /* 语义色：深色模式适度调暗避免刺眼，但仍需可辨识 */
+  --expense:#E87585; --expense-bg:rgba(232,117,133,.16);
+  --income:#7ACFA0; --income-bg:rgba(122,207,160,.16);
+  --neutral:#8E93A2; --neutral-bg:rgba(142,147,162,.16);
+  /* 日历热力：深色模式薄荷蓝绿 4 档（与 cal 图标同源） */
+  --cal-heat-1:#1E3A2E;        /* 极深薄荷（最低支出） */
+  --cal-heat-2:#2E5042;        /* 深薄荷（低支出） */
+  --cal-heat-3:#46755E;        /* 中薄荷（中支出） */
+  --cal-heat-4:#6FCBA0;        /* 亮薄荷绿（最高支出，深底跳出来） */
+  --cal-inc-bg:#1E3848;        /* 收入日专用底色（深蓝灰） */
+  /* 日历金额字色（深色：h1·h2 深底用亮色原色；h3 中等亮度底提亮；h4 亮薄荷底反转为深字） */
+  --cal-amt-e1:#E87585; --cal-amt-i1:#7ACFA0;
+  --cal-amt-e2:#FFC9D0; --cal-amt-i2:#B9F0D2;
+  --cal-amt-e3:#4A1420; --cal-amt-i3:#0A3A26;
+  /* 深色模式阴影：用纯黑高透明度（深色底上深色阴影才有"凹陷感"） */
+  --shadow:0 1px 2px rgba(0,0,0,.40), 0 4px 16px rgba(0,0,0,.35);
+  --shadow-md:0 2px 8px rgba(0,0,0,.45), 0 8px 24px rgba(0,0,0,.40);
+  --shadow-lg:0 4px 16px rgba(0,0,0,.50), 0 16px 48px rgba(0,0,0,.45);
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:14px;transition:background .2s,color .2s;font-variant-numeric:tabular-nums}
+/* 焦点框全局不显示（输入框另有 :focus 描边，见下） */
+*:focus{outline:none}
+
+*{-webkit-tap-highlight-color:transparent}
+
+/* ===== 全局滚动条：细窄悬浮式，透明轨道 + 半透明滑块 =====
+   深色模式默认滚动条是浅灰实心条，与深底对比过强；这里统一改为
+   10px 轨道 + 3px 透明描边（实际可见滑块仅 4px），hover 才提亮。
+   Firefox 走 scrollbar-width/color；modal/schips 的隐藏规则优先级更高，不受影响。 */
+*{scrollbar-width:thin;scrollbar-color:var(--sb-thumb) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--sb-thumb);border-radius:8px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background-color:var(--sb-thumb-hover)}
+::-webkit-scrollbar-corner{background:transparent}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+svg{display:block;flex-shrink:0}
+button{cursor:pointer;font-family:inherit}
+select,input,textarea{font:inherit;color:var(--fg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;background:var(--card);transition:border-color .15s}
+input:focus,select:focus{outline:2px solid var(--primary-2);outline-offset:1px;border-color:var(--primary-2)}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+/* ===== 布局 ===== */
+
+body{overflow:hidden}
+.shell{display:flex;height:100vh}
+@supports (height:100dvh){.shell{height:100dvh}}
+.sidebar{width:200px;border-right:1px solid var(--border);display:flex;flex-direction:column;gap:4px;padding:12px 8px;background:var(--card);position:sticky;top:0;height:100vh;overflow-x:hidden;overflow-y:auto;white-space:nowrap;flex-shrink:0}
+/* 手机弹输入法时布局视口压矮,flex 纵列默认会压缩子项——菜单项定高不缩,放不下改滚动 */
+.sidebar>*{flex-shrink:0}
+.nav-item{height:44px;border-radius:10px;display:flex;align-items:center;justify-content:flex-start;gap:12px;padding:0 10px;color:var(--muted);border:none;background:none;transition:background .18s,color .18s;position:relative;font-size:14px}
+.nav-item svg{flex-shrink:0}
+.nav-item .lbl{opacity:1;overflow:hidden}
+.nav-item:hover{background:var(--hover);color:var(--fg)}
+/* ===== nav-item.on：按 data-p 映射到对应马卡龙色系 ===== */
+/* ai 薰衣草紫 */
+.nav-item.on[data-p="ai"]{background:var(--m-purple-100);color:var(--m-purple-fg)}
+.nav-item.on[data-p="ai"]::before{background:var(--m-purple)}
+/* list 天空蓝（流水） */
+.nav-item.on[data-p="list"]{background:var(--m-blue-100);color:var(--m-blue-fg)}
+.nav-item.on[data-p="list"]::before{background:var(--m-blue)}
+/* cal 薄荷绿 */
+.nav-item.on[data-p="cal"]{background:var(--m-mint-100);color:var(--m-mint-fg)}
+.nav-item.on[data-p="cal"]::before{background:var(--m-mint)}
+/* stats 蜜桃橙 */
+.nav-item.on[data-p="stats"]{background:var(--m-peach-100);color:var(--m-peach-fg)}
+.nav-item.on[data-p="stats"]::before{background:var(--m-peach)}
+/* renqing 樱花粉 */
+.nav-item.on[data-p="renqing"]{background:var(--m-pink-100);color:var(--m-pink-fg)}
+.nav-item.on[data-p="renqing"]::before{background:var(--m-pink)}
+/* settings 莫兰迪灰 */
+.nav-item.on[data-p="settings"]{background:var(--m-gray-100);color:var(--m-gray-fg)}
+.nav-item.on[data-p="settings"]::before{background:var(--m-gray)}
+/* io 奶黄 */
+.nav-item.on[data-p="io"]{background:var(--m-butter-100);color:var(--m-butter-fg)}
+.nav-item.on[data-p="io"]::before{background:var(--m-butter)}
+.nav-item.on{background:var(--primary-bg);color:var(--primary-fg)}
+.nav-item.on::before{content:"";position:absolute;left:-8px;top:10px;bottom:10px;width:3px;border-radius:2px;background:var(--primary)}
+.nav-item .bdg{display:inline-block;font-size:11px;background:var(--pending);color:#fff;border-radius:999px;padding:0 7px;line-height:17px}
+.main{flex:1;min-width:0;height:100vh;overflow-y:auto;overflow-x:hidden}
+@supports (height:100dvh){.main{height:100dvh}}
+/* ===== 顶栏 ===== */
+.ledger-box{padding:10px 10px 12px;border-bottom:1px solid var(--border);margin-bottom:10px}
+
+.gbar{position:fixed;top:0;left:200px;right:0;z-index:40;display:flex;align-items:flex-start;gap:8px;padding:10px 16px 12px;background:var(--bg);border-bottom:1px solid var(--border)}
+.gbar-inner{flex:1;min-width:0}
+
+@media(min-width:1400px){.gbar-inner{max-width:1400px;margin:0 auto;padding:0 clamp(16px,4vw,64px)}}
+.gbar-row{display:flex;align-items:center;gap:8px;min-height:34px}
+.gbar .scope-slot{margin-left:auto;display:flex;justify-content:flex-end;align-items:center;gap:6px;min-width:0}
+
+.gb-user{display:inline-flex;align-items:center;gap:8px;border:none;background:none;color:var(--fg);
+  font-size:14.5px;line-height:1;cursor:pointer;font-family:inherit;white-space:nowrap;flex:none;
+  padding:6px 14px 6px 6px;border-radius:999px;transition:background .15s}
+.gb-user:hover{background:var(--hover)}
+.gb-user b{font-weight:600;line-height:1}
+.gb-user .gw{color:var(--muted);font-size:13.5px;line-height:1}
+.gb-user img{width:26px;height:26px;border-radius:9px;flex:none}
+@media(max-width:680px){.gb-user .gw{display:none}.gb-user{padding:6px 10px 6px 6px}}
+
+/* 胶囊范围选择器：横向排布，窄屏可滑动 */
+.schips{display:flex;gap:6px;align-items:center;min-width:0;overflow-x:auto;scrollbar-width:none;padding:2px}
+.schips::-webkit-scrollbar{display:none}
+/* 取值控件（月/年）与胶囊同尺寸同圆角，选中时同款蓝底——消除基线参差与双选中态歧义 */
+.schips input,.schips select{flex:none;height:30px;padding:0 12px;font-size:13px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-family:inherit}
+
+#appScope,#monthSel,#yearSel,#sc_from,#sc_to{
+  padding:0 24px 0 12px;text-align:left;field-sizing:content;
+  background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238B92A6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 9px center}
+
+#appScope{width:calc(3em + 36px)}   /* 3 个字 + 箭头区（左12右24） */
+/* 不支持 field-sizing 的旧内核回退：按内容上限定宽（宁宽勿压） */
+@supports not (field-sizing: content){
+  #monthSel{width:12ch}#yearSel{width:10ch}#sc_from,#sc_to{width:15ch}
+}
+.schips input:hover,.schips select:hover{background:var(--hover)}
+.schips input[type="date"]{height:30px}
+
+.gbar .gbar-menu{display:none}
+/* 主区让位：高度跟随顶栏实际内容（JS 写回 --gbar-h；缺省 96px 兜底） */
+.main{padding-top:var(--gbar-h,96px)}
+
+body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="settings"] .gbar{display:none}
+body[data-page="renqing"] .main, body[data-page="io"] .main, body[data-page="settings"] .main{padding-top:0}
+body[data-page="renqing"] .gbar .gbar-inner, body[data-page="io"] .gbar .gbar-inner,
+body[data-page="settings"] .gbar .gbar-inner{display:none}
+/* 手机菜单条不带底部分界线，与页面融为一体 */
+body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="settings"] .gbar{border-bottom:none}
+.icon-btn{width:34px;height:34px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--card);color:var(--muted);display:flex;align-items:center;justify-content:center;transition:background .18s,color .18s,border-color .18s;position:relative}
+.icon-btn:hover{background:var(--hover);color:var(--fg);border-color:var(--primary-2)}
+.spacer{flex:1}
+.c-exp{color:var(--expense)}
+.c-inc{color:var(--income)}
+/* ===== 通用 ===== */
+
+.page{display:none;padding:20px clamp(16px,4vw,64px);max-width:1400px;margin:0 auto}
+.page.on{display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+.sub{font-size:12px;color:var(--muted)}
+.btn{border-radius:var(--radius-sm);padding:9px 16px;font-size:14px;font-weight:500;border:none;transition:opacity .18s,background .18s,transform .12s;white-space:nowrap}
+.btn-pri{background:var(--primary);color:var(--on-primary)}
+.btn-pri:hover{background:var(--primary-fg);transform:translateY(-1px)}
+/* 深色模式：btn-pri hover 改用 bd（更深的中等亮度），避免淡蓝底白字对比度不足 */
+[data-theme="dark"] .btn-pri:hover{background:var(--primary-2)}
+.btn-ghost{background:none;border:1px solid var(--border);color:var(--fg)}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:680px){.grid3{grid-template-columns:1fr 1fr}}
+/* ===== Toast 系统（顶部下滑动画 + 3 秒自动消失） ===== */
+.msg{position:fixed;top:-60px;left:50%;transform:translateX(-50%);z-index:99;padding:12px 22px;border-radius:var(--radius-lg);display:block;font-size:14px;font-weight:500;box-shadow:var(--shadow-lg);transition:top .35s cubic-bezier(.34,1.56,.64,1);min-width:180px;text-align:center;opacity:0;pointer-events:none}
+.msg.on{top:20px;opacity:1;pointer-events:auto}
+.modal-mask{position:fixed;inset:0;background:var(--mask);backdrop-filter:blur(2px);z-index:90;display:none;align-items:center;justify-content:center;padding:16px}
+.modal-mask.on{display:flex}
+
+#rcpMask{z-index:95}
+/* 带内嵌 SVG 的幽灵按钮：图标与文字垂直居中对齐 */
+.btn-ghost svg{vertical-align:-2px}
+#e_rcp_row .btn-ghost{display:inline-flex;align-items:center;gap:5px}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);max-width:600px;width:100%;max-height:90vh;overflow:auto;padding:0;box-shadow:var(--shadow-lg)}
+
+/* 所有弹窗恢复细滚动条——长列表需要视觉反馈 */
+.modal{scrollbar-width:thin;scrollbar-color:var(--sb-thumb) transparent}
+.modal::-webkit-scrollbar{display:block;width:6px}
+.modal::-webkit-scrollbar-thumb{background:var(--sb-thumb);border-radius:8px}
+.modal::-webkit-scrollbar-track{background:transparent}
+.modal .modal-body{scrollbar-width:thin;scrollbar-color:var(--sb-thumb) transparent}
+.modal .modal-body::-webkit-scrollbar{display:block;width:6px}
+.modal .modal-body::-webkit-scrollbar-thumb{background:var(--sb-thumb);border-radius:8px}
+.modal label{font-size:12px;color:var(--muted)}
+.modal input,.modal select{width:100%}
+.modal .grid3{gap:12px}
+.modal .grid3>div{min-width:0;margin-top:8px}
+/* 预览模态框：宽屏 + head/body/foot 三段式 */
+.modal-pv{max-width:980px;display:flex;flex-direction:column;overflow:hidden}
+/* 弹窗渐变顶条（马卡龙色系，宽度仅 3px 顶部）——视觉锚定但不喧宾夺主 */
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);position:relative}
+.modal-head::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--m-purple),var(--m-blue),var(--m-mint),var(--m-peach));border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.modal-body{padding:14px 20px;overflow:auto;flex:1;min-height:0}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
+/* 导入框：图标 + 文字 + 文件名一行；hover 显示可点击 */
+.imp-btn{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-top:10px;border:1px dashed var(--m-butter-bd);border-radius:var(--radius-sm);cursor:pointer;background:var(--m-butter-50);transition:border-color .15s,background .15s,transform .12s}
+[data-theme="dark"] .imp-btn{background:var(--m-butter-50);border-color:var(--m-butter-bd)}
+.imp-btn:hover{border-color:var(--m-butter);border-style:solid;background:var(--card);transform:translateY(-1px)}
+[data-theme="dark"] .imp-btn:hover{background:var(--m-butter-100)}
+[data-theme="dark"] .imp-btn.has-file{background:var(--m-butter-50)}
+.imp-btn svg{color:var(--muted)}
+.imp-btn>span:first-of-type{font-weight:500}
+.imp-name{flex:1;text-align:right;color:var(--muted);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.imp-btn.has-file .imp-name{color:var(--fg)}
+.imp-btn.has-file>span:first-of-type{color:var(--m-butter-fg)}
+.imp-opts{display:flex;align-items:center;justify-content:space-between;margin-top:10px}
+.imp-ai{display:flex;align-items:center;gap:6px;margin:0;color:var(--fg);font-size:13px}
+.imp-ai input{width:auto}
+/* 导出条：日期紧凑、预设按钮一行；按钮最右；label 内联与按钮同基线 */
+.exp-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+.exp-field{display:flex;flex-direction:row;align-items:center;gap:6px;flex:0 0 auto}
+.exp-field input{width:140px}
+.exp-label{font-size:12px;color:var(--muted)}
+.exp-sep{color:var(--muted);font-size:12px}
+.exp-presets{display:flex;gap:6px}
+.exp-presets .btn.on{background:var(--primary-bg);color:var(--primary-fg);border-color:var(--primary-2)}
+
+.exp-btns{margin-left:auto;display:flex;gap:8px;flex:0 0 auto;flex-wrap:nowrap}
+/* 手机版导出行固定两行：日期组独占第一行，预设+下载第二行；桌面 display:contents 让包装 div 透明 */
+.exp-dates{display:contents}
+@media(max-width:768px){
+  .exp-row{gap:8px 6px}
+  .exp-dates{display:flex;align-items:center;gap:6px;flex-basis:100%}
+  .exp-field{flex:1 1 0;min-width:0}
+  .exp-field input{width:100%;min-width:0}
+  /* 第二行五个按钮挤一行：整体缩小按钮内距与字号 */
+  .exp-presets .btn{padding:4px 10px;font-size:12px}
+  .exp-row .btn-pri{padding:5px 12px;font-size:12px}
+}
+
+.pv-list .tx-card{
+  border:none;
+  border-bottom:1px solid var(--border);
+  border-radius:0;
+  background:transparent;
+  cursor:default;
+}
+.pv-list .tx-card:hover{background:transparent}
+.pv-list .tx-card:last-child{border-bottom:none}
+.pv-list .tx-row{padding:10px 4px}
+/* 预览行间不画渐隐横线（视觉已有 border-bottom） */
+.pv-list .tx-row+.tx-row::before{display:none}
+/* 真根因：select/tags 都没有宽度约束，原生 min-content 把 tx-body 挤瘪 */
+.pv-list .tx-row .tx-sub select{max-width:110px;min-width:80px;overflow:hidden;text-overflow:ellipsis}
+.pv-list .tx-row .tx-sub span.sub{font-size:11px}
+.pv-list .tx-row>.tx-right>.tx-tags{flex-shrink:0;max-width:130px;overflow:hidden;align-self:flex-end}
+.pv-list .tx-row>.tx-right>.tx-tags .tag{display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pv-list .tx-row>.tx-right>.tx-amt-row{flex-shrink:0;min-width:55px}
+.pv-list .tx-row>.tx-right>.tx-amt-row>.tx-src{font-size:10.5px;padding:1px 6px;line-height:1.2}
+.pv-list .tx-row>.tx-right>.tx-amt-row>.tx-src-stack{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+/* 导入批次：手机端表格转卡片布局 */
+@media(max-width:768px){
+  #batchTable{border:0}
+  #batchTable thead{display:none}
+  #batchTable tbody,#batchTable tr,#batchTable td{display:block;width:auto;padding:0;border:0}
+  #batchTable tr{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center}
+  #batchTable td:nth-child(1){grid-column:1/2;color:var(--muted);font-size:12px}
+  #batchTable td:nth-child(2){grid-column:1/2;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #batchTable td:nth-child(3){grid-column:1/2;font-size:12px;color:var(--muted)}
+  #batchTable td:nth-child(3):before{content:"来源 · "}
+  #batchTable td:nth-child(4){grid-column:1/2;font-size:12px;color:var(--muted)}
+  #batchTable td:nth-child(4):before{content:"笔数 · "}
+  #batchTable td:nth-child(5){grid-column:2/3;grid-row:1/5;align-self:center}
+}
+
+#txList{padding:6px;border:none;background:transparent}
+#txList .tx-card{margin-bottom:8px}
+#txList .tx-card:last-child{margin-bottom:0}
+.msg.ok{background:var(--income);color:#fff}
+.msg.err{background:var(--expense);color:#fff}
+.msg.info{background:var(--m-blue);color:#fff}
+.empty{padding:36px;text-align:center;color:var(--muted)}
+
+/* ===== 移动端 ===== */
+@media(max-width:768px){
+  body{--drawer-w:170px}
+  .sidebar{display:flex;position:fixed;left:0;top:0;bottom:0;height:100vh;width:var(--drawer-w);z-index:60;
+    transform:translateX(-100%);transition:transform .22s ease;box-shadow:0 0 40px rgba(0,0,0,.18)}
+  .sidebar.open{transform:translateX(0)}
+  .sidebar-mask{position:fixed;inset:0;background:transparent;z-index:59;display:none}
+  .sidebar-mask.on{display:block}
+  .page{padding:14px}
+
+
+  /* 手机：顶栏改 fixed 钉死视口——sticky 受父容器 .main 高度限制,部分 WebView 会整页带走;
+     fixed 不依赖父级,配合 .main 顶部让位;抽屉推挤时 .main 的 transform 会让 fixed 跟随位移,视觉正确 */
+  .gbar{display:flex;position:fixed;top:0;left:0;right:0}
+  /* 三个人情/导入/设置页：手机保留菜单条（☰）并让位 */
+  body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="settings"] .gbar{display:flex;padding:6px 10px}
+  body[data-page="renqing"] .main, body[data-page="io"] .main, body[data-page="settings"] .main{padding-top:48px}
+
+  .gbar .gbar-menu{display:flex;flex:none;width:36px;height:36px;border:none;background:transparent;color:var(--fg);border-radius:50%}
+  .gbar .gbar-menu:hover{background:var(--hover);border-color:transparent}
+
+  /* 人情/导入/设置页：桌面隐藏整个 gbar-inner，手机端菜单按钮已移入其中——恢复显示首行、
+     仍隐藏汇总行（这三页无汇总数据） */
+  body[data-page="renqing"] .gbar .gbar-inner, body[data-page="io"] .gbar .gbar-inner,
+  body[data-page="settings"] .gbar .gbar-inner{display:block}
+  body[data-page="renqing"] .gbar .gsum, body[data-page="io"] .gbar .gsum,
+  body[data-page="settings"] .gbar .gsum{display:none}
+  .tx-filter .filters{flex-wrap:wrap}
+  .tx-filter .filters .fchip{flex:0 1 auto;white-space:nowrap}
+  /* 手机版流水页：收紧左右留空（page 14→8、容器 6→4、行 12→10）让卡片更贴近视口 */
+  #tab-list{padding:8px}
+  #tab-list #txList{padding:4px}
+  #tab-list .tx-card .tx-row{padding:10px 10px}
+
+  /* 推挤式抽屉：主区域整体右移让位；收起后移除 transform，恢复 sticky 顶栏 */
+  .main{transition:transform .22s ease}
+  .main.pushed{transform:translateX(var(--drawer-w))}
+  .nav-item{font-size:13px;height:40px;gap:8px;padding:0 8px}
+  .ledger-box{padding:8px 8px 10px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}

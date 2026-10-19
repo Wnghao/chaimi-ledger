@@ -1,4 +1,4 @@
-# lulu 的记账本（lulu-ledger）
+# 柴米记账（chaimi-ledger）
 
 数据全在本机的家庭记账应用，飞牛 NAS（fnOS）原生应用形态。一家人共用，多账本分账，支持账单一键导入、AI 记账和微信机器人。
 
@@ -20,8 +20,8 @@
 |---|---|
 | 后端 | Python 3.12 · FastAPI · uvicorn |
 | 前端 | 单 HTML + 原生 JS + Chart.js 4（按需加载，无构建链） |
-| 存储 | SQLite 单文件（`lulu.db`） |
-| 部署 | 飞牛 fnOS 原生应用（fpk 包），网关 `/app/lulu-ledger` 反代 |
+| 存储 | SQLite 单文件（`chaimi.db`） |
+| 部署 | 飞牛 fnOS 原生应用（fpk 包），网关 `/app/chaimi-ledger` 反代 |
 
 设计细节见 [DESIGN.md](DESIGN.md)（架构 / 数据库 / API / AI / 导入 / 微信机器人全设计）。
 
@@ -38,7 +38,7 @@
 
 **可选：开启 Web 层 Basic Auth**（v1.0.1+，需要比内网边界多一层门时）
 
-编辑配置文件 `lulu.conf`（飞牛在 `@PKGETC/var/`，本地开发在 `app/src/`）：
+编辑配置文件 `chaimi.conf`（飞牛在 `@PKGETC/var/`，本地开发在 `app/src/`）：
 
 ```json
 "web_auth": { "enabled": true, "username": "你的用户名", "password": "你的密码" }
@@ -55,12 +55,12 @@
 ### 本地开发
 
 ```bash
-cd lulu-ledger-fn/app/src
+cd chaimi-ledger-fn/app/src
 pip install -r requirements.txt
 python server.py --host 127.0.0.1 --port 18710
 ```
 
-浏览器打开 <http://127.0.0.1:18710> 即可。数据库会自动创建在 `app/data/lulu.db`。
+浏览器打开 <http://127.0.0.1:18710> 即可。数据库会自动创建在 `app/data/chaimi.db`。
 
 ## 📦 构建 fpk
 
@@ -74,10 +74,10 @@ build.bat
 ## 📁 目录结构
 
 ```
-lulu-ledger/
+chaimi-ledger/
 ├── DESIGN.md            # 设计文档（架构/数据库/API/AI/导入/微信机器人）
 ├── build.bat            # fpk 打包脚本
-└── lulu-ledger-fn/
+└── chaimi-ledger-fn/
     ├── manifest         # 飞牛应用清单
     ├── cmd/             # 飞牛生命周期脚本（安装/升级/启停回调）
     ├── config/          # 权限与资源声明
@@ -105,6 +105,7 @@ lulu-ledger/
 | openai | Apache-2.0 | LLM / 视觉模型客户端（OpenAI 兼容协议） |
 | openpyxl | MIT | 微信 xlsx 账单解析 |
 | python-multipart | Apache-2.0 | 文件上传 |
+| Pillow | MIT-CMU (HPND) | 小票图片裁剪压缩 |
 | segno | BSD-3-Clause | 机器人扫码二维码 |
 | pycryptodome | BSD-2-Clause / 公有领域双许可 | 凭证加密存储 |
 

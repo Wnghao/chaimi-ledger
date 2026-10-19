@@ -13,20 +13,20 @@ class TestApplog(unittest.TestCase):
     def test_setup_idempotent_and_writes_file(self):
         import os, tempfile, pathlib
         tmp = tempfile.mkdtemp()
-        os.environ["LULU_CONF"] = str(pathlib.Path(tmp) / "c.conf")
-        os.environ["LULU_DB"] = str(pathlib.Path(tmp) / "t.db")
+        os.environ["CHAIMI_CONF"] = str(pathlib.Path(tmp) / "c.conf")
+        os.environ["CHAIMI_DB"] = str(pathlib.Path(tmp) / "t.db")
         log1 = applog.setup()
         log2 = applog.setup()                      # 幂等：不重复挂 handler
         self.assertIs(log1, log2)
         self.assertEqual(len(log1.handlers), 2)    # stdout + 轮转文件
         name = applog.get("utest").name
-        self.assertEqual(name, "lulu.utest")
+        self.assertEqual(name, "chaimi.utest")
         applog.get("utest").info("冒烟日志行-for-test")
         for h in log1.handlers:
             h.flush()
         content = config.log_path().read_text(encoding="utf-8")
         self.assertIn("冒烟日志行-for-test", content)   # 轮转文件确实落盘
-        self.assertIn("INFO [lulu.utest]", content)     # 格式带级别与模块名
+        self.assertIn("INFO [chaimi.utest]", content)     # 格式带级别与模块名
         # 清理：摘掉 handler 关文件句柄（Windows 删除前置条件）
         for h in list(log1.handlers):
             h.close()

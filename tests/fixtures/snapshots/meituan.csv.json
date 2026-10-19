@@ -1,0 +1,65 @@
+[
+ {
+  "amount": 3,
+  "attribution": "测试用户01",
+  "date": "2026-09-29 21:15:00",
+  "hash_fields": [
+   "2026/9/29 21:15",
+   "小象超市（城东大道店）",
+   "3",
+   "2609290030354160999",
+   ""
+  ],
+  "is_refund": true,
+  "merchant": "",
+  "name": "小象超市（城东大道店）",
+  "note": "",
+  "order_no": "2609290030354160999",
+  "pay_account": "中国农业银行储蓄卡(1234)",
+  "platform": "meituan",
+  "source_category": "退款",
+  "type": "transfer"
+ },
+ {
+  "amount": 2246,
+  "attribution": "测试用户01",
+  "date": "2026-09-29 20:58:00",
+  "hash_fields": [
+   "2026/9/29 20:58",
+   "小象超市（城东大道店）",
+   "2246",
+   "260929112007016700046953700888",
+   ""
+  ],
+  "is_refund": false,
+  "merchant": "",
+  "name": "小象超市（城东大道店）",
+  "note": "",
+  "order_no": "260929112007016700046953700888",
+  "pay_account": "中国农业银行储蓄卡(1234)",
+  "platform": "meituan",
+  "source_category": "支付",
+  "type": "expense"
+ },
+ {
+  "amount": 2786,
+  "attribution": "测试用户01",
+  "date": "2026-09-29 20:58:00",
+  "hash_fields": [
+   "2026/9/29 20:58",
+   "小象便利",
+   "2786",
+   "420000314620260929022900",
+   ""
+  ],
+  "is_refund": false,
+  "merchant": "",
+  "name": "小象便利",
+  "note": "",
+  "order_no": "420000314620260929022900",
+  "pay_account": "微信支付",
+  "platform": "meituan",
+  "source_category": "支付",
+  "type": "expense"
+ }
+]

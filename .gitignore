@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 
 # 运行时数据（SQLite 库、小票等，绝不入库）
-lulu-ledger-fn/app/data/
+chaimi-ledger-fn/app/data/
 
 # 构建产物
 *.fpk

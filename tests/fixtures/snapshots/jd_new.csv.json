@@ -1,0 +1,178 @@
+[
+ {
+  "skip": "0 元行（先享后付等）"
+ },
+ {
+  "amount": 18581,
+  "attribution": "测试用户01",
+  "date": "2026-10-17 14:34:49",
+  "extra_categories": [],
+  "hash_fields": [
+   "2026-10-17 14:34:49\t",
+   "网购",
+   "京东平台商户",
+   "退款-松能显示器支架 机械臂 显示器支架臂 T930-1B",
+   "18581",
+   "3654264002400001\t",
+   " "
+  ],
+  "is_refund": true,
+  "merchant": "京东平台商户",
+  "name": "退款-松能显示器支架 机械臂 显示器支架臂 T930-1B",
+  "note": "京东平台商户",
+  "order_no": "3654264002400001",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "网购",
+  "type": "transfer"
+ },
+ {
+  "amount": 18581,
+  "attribution": "测试用户01",
+  "bracket_refund": 18581,
+  "date": "2026-10-17 14:34:23",
+  "extra_categories": [],
+  "hash_fields": [
+   "2026-10-17 14:34:23\t",
+   "电脑办公",
+   "京东平台商户",
+   "松能显示器支架 机械臂 显示器支架臂 T930-1B 等多件",
+   "18581",
+   "3654264002500002\t",
+   " "
+  ],
+  "is_refund": false,
+  "merchant": "京东平台商户",
+  "name": "松能显示器支架 机械臂 显示器支架臂 T930-1B 等多件",
+  "note": "京东平台商户",
+  "order_no": "3654264002500002",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "电脑办公",
+  "type": "expense"
+ },
+ {
+  "amount": 5636,
+  "attribution": "测试用户01",
+  "date": "2026-10-17 14:33:51",
+  "extra_categories": [],
+  "hash_fields": [
+   "2026-10-17 14:33:51\t",
+   "电脑办公",
+   "京东平台商户",
+   "松能显示器支架 机械臂 显示器支架臂 T930-1B 等多件",
+   "5636",
+   "3654264002500003\t",
+   " "
+  ],
+  "is_refund": false,
+  "merchant": "京东平台商户",
+  "name": "松能显示器支架 机械臂 显示器支架臂 T930-1B 等多件",
+  "note": "京东平台商户",
+  "order_no": "3654264002500003",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "电脑办公",
+  "type": "expense"
+ },
+ {
+  "amount": 2672,
+  "attribution": "测试用户01",
+  "date": "2026-10-02 17:11:14",
+  "extra_categories": [],
+  "hash_fields": [
+   "2026-10-02 17:11:14\t",
+   "网购",
+   "京东平台商户",
+   "退款-京斯坦儿童U型牙刷1-2-3-6岁宝宝刷牙神器硅胶软毛",
+   "2672",
+   "3639464010800001\t",
+   " "
+  ],
+  "is_refund": true,
+  "merchant": "京东平台商户",
+  "name": "退款-京斯坦儿童U型牙刷1-2-3-6岁宝宝刷牙神器硅胶软毛",
+  "note": "京东平台商户",
+  "order_no": "3639464010800001",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "网购",
+  "type": "transfer"
+ },
+ {
+  "amount": 15288,
+  "attribution": "测试用户01",
+  "bracket_refund": 2672,
+  "date": "2026-10-02 17:10:40",
+  "extra_categories": [
+   "电脑办公"
+  ],
+  "hash_fields": [
+   "2026-10-02 17:10:40\t",
+   "母婴用品 电脑办公",
+   "京东平台商户",
+   "罗技（G）G102 有线游戏鼠标 轻量化设计 RGB灯效 黑色 等多件",
+   "15288",
+   "3639464010700002\t",
+   " "
+  ],
+  "is_refund": false,
+  "merchant": "京东平台商户",
+  "name": "罗技（G）G102 有线游戏鼠标 轻量化设计 RGB灯效 黑色 等多件",
+  "note": "京东平台商户",
+  "order_no": "3639464010700002",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "母婴用品",
+  "type": "expense"
+ },
+ {
+  "amount": 6210,
+  "attribution": "测试用户01",
+  "date": "2026-10-02 17:11:35",
+  "extra_categories": [],
+  "hash_fields": [
+   "2026-10-02 17:11:35\t",
+   "网购",
+   "京东平台商户",
+   "退款-酷骑儿童头盔护具五件套 头盔护肘护膝酷骑绿",
+   "6210",
+   "3639464010800003\t",
+   " "
+  ],
+  "is_refund": true,
+  "merchant": "京东平台商户",
+  "name": "退款-酷骑儿童头盔护具五件套 头盔护肘护膝酷骑绿",
+  "note": "京东平台商户",
+  "order_no": "3639464010800003",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "网购",
+  "type": "transfer"
+ },
+ {
+  "amount": 6210,
+  "attribution": "测试用户01",
+  "bracket_refund": 6210,
+  "date": "2026-10-02 17:03:27",
+  "extra_categories": [],
+  "hash_fields": [
+   "2026-10-02 17:03:27\t",
+   "母婴用品",
+   "京东平台商户",
+   "酷骑儿童头盔护具五件套 头盔护肘护膝酷骑绿",
+   "6210",
+   "3639464010800004\t",
+   " "
+  ],
+  "is_refund": false,
+  "merchant": "京东平台商户",
+  "name": "酷骑儿童头盔护具五件套 头盔护肘护膝酷骑绿",
+  "note": "京东平台商户",
+  "order_no": "3639464010800004",
+  "pay_account": "农业银行储蓄卡(1234)",
+  "platform": "jd",
+  "source_category": "母婴用品",
+  "type": "expense"
+ }
+]

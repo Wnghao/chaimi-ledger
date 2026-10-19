@@ -1,15 +1,15 @@
-# lulu-ledger 设计文档
+# chaimi-ledger 设计文档
 
 > 飞牛 NAS（fnOS）原生家庭记账应用。多账本分账 + 账单导入 + 统计看板 + AI 记账 + 微信机器人，数据全在本机 SQLite。
 >
-> 状态：v1.0.2（manifest 版本）已实现并稳定运行，本文描述**当前实现**，规划期版本已精简合并。
+> 状态：**v1.0.0（首个正式版，2026-10-18）**。本文描述当前实现。
 
 ***
 
 ## 一、项目概述
 
-- **形态**：飞牛原生应用（fpk 包），网关以 iframe 挂载 `/app/lulu-ledger`
-- **存储**：SQLite 单文件（`lulu.db`），零配置，备份 = 拷文件
+- **形态**：飞牛原生应用（fpk 包），网关以 iframe 挂载 `/app/chaimi-ledger`
+- **存储**：SQLite 单文件（`chaimi.db`），零配置，备份 = 拷文件
 - **后端**：FastAPI（Python 3.12，`--target` 隔离装依赖，不污染系统）
 - **前端**：单 HTML + 原生 JS + Chart.js 4（按需加载，无构建链）
 - **用户模型**：家庭共用，多账本（日常/旅行/装修），「用户」是记账人维度而非登录账号，无权限隔离（内网部署信任飞牛网关鉴权）
@@ -21,14 +21,19 @@
 | 文件 | 职责 |
 |---|---|
 | server.py | FastAPI 入口：记账 CRUD / 统计 / 导入 / 配置 / 备份 / AI / bot 路由 |
-| config.py | JSON 配置（lulu.conf）+ TRIM_* 环境变量 + llm/vision/bot 段 |
+| config.py | JSON 配置（chaimi.conf）+ TRIM_* 环境变量 + llm/vision/bot 段 |
 | db.py | SQLite schema、迁移、公共查询、默认映射种子（DEFAULT_MAPPINGS） |
-| import_bill.py | 账单导入（CSV/xlsx 解析、分类、退款匹配、去重） |
+| import_bill.py | 导入门面：统一路由 + 模板引擎与原语（对外入口 `parse_bill/build_previews`） |
+| platform_templates.py | 内置平台模板声明数据（支付宝/微信/京东/导出/美团，随应用发版） |
+| import_classify.py | 分类瀑布：词典/映射/同名/兜底 + 人情二切与复核 + 自愈清理 |
+| import_match.py | 账本快照、退款匹配链、跨源/手动配对 |
+| import_apply.py | 入库四阶段（增强/批次/插入+learn+批内回填/rescan）与整批撤销 |
+| import_common.py | 导入链路叶子工具（normalize/去重谓词/占位名判定） |
 | ai.py | AI 记账：自然语言/小票/月报/对话 + edit_round 编辑回合 |
 | backup.py | SQLite 文件备份 + 配置副本 |
 | bot_core.py | 机器人大脑：白名单、指令路由、草稿会话、回复格式化（通道无关） |
 | bot_ilink.py | 通道 A：iLink 客户端（QR 登录、长轮询、收发、媒体下载解密） |
-| lulu_mcp.py | 通道 B 的 MCP server（stdio，独立进程） |
+| chaimi_mcp.py | 通道 B 的 MCP server（stdio，独立进程） |
 
 前端（app/static/）：app.html 主界面 + home.html 登录/选用户页 + core/ledger/stats/settings/ai/import .js 分页逻辑。
 
@@ -37,15 +42,15 @@
 ## 二、整体架构
 
 ```
-飞牛桌面 ──iframe──▶ lulu-server(FastAPI)
+飞牛桌面 ──iframe──▶ chaimi-server(FastAPI)
                         │
    ┌─────────┬──────────┼──────────┬─────────────┐
    ▼         ▼          ▼          ▼             ▼
  记账CRUD   统计图表   账单导入     备份        AI 记账 ──▶ LLM / 视觉 API
- (db.py)  (Chart.js)(import_bill)(backup.py)      │
+ (db.py)  (Chart.js)(import_*)(backup.py)      │
    └─────────┴──────────┴──────────┴──────┬───────┘
                                           ▼
-                                    SQLite(lulu.db)
+                                    SQLite(chaimi.db)
 微信 ──iLink──▶ bot_ilink(A直连) ──┐
                                   ├─▶ bot_core.handle() ──▶ db / ai.chat
 OpenClaw ──MCP/REST──▶ /api/bot(B网关) ──┘
@@ -54,10 +59,10 @@ OpenClaw ──MCP/REST──▶ /api/bot(B网关) ──┘
 **网关三件套**（SSE 流式与相对路径必需）：
 
 - 响应头 `X-Accel-Buffering: no`
-- `<base href="/app/lulu-ledger/">` 注入
+- `<base href="/app/chaimi-ledger/">` 注入
 - SSE 流内 15s 心跳注释行保活
 
-**多端实时刷新（长轮询）**：`GET /api/rev/wait?since=N&hold=25` 挂住最多 25s（服务端钳制 1~30s），数据版本 rev 偏离立即返回；前端返回后 300ms 续下一条、出错 2s 退避、单请求 35s 强制 abort 防半开连接；页面回前台（focus/visibilitychange/pageshow）掐掉挂起请求并主动刷一次。任意端记账，其他端 1s 内刷新。写库侧统一 `_bump_rev`：交易增/改/删、待确认转正、导入应用/撤销、bot 写库全部同源。请求带 `?cv=版本信标`（build 时烘焙 `static/version.txt`，页面注入 `window.LULU_VER`），日志可分辨各客户端前端版本。
+**多端实时刷新（长轮询）**：`GET /api/rev/wait?since=N&hold=25` 挂住最多 25s（服务端钳制 1~30s），数据版本 rev 偏离立即返回；前端返回后 300ms 续下一条、出错 2s 退避、单请求 35s 强制 abort 防半开连接；页面回前台（focus/visibilitychange/pageshow）掐掉挂起请求并主动刷一次。任意端记账，其他端 1s 内刷新。写库侧统一 `_bump_rev`：交易增/改/删、待确认转正、导入应用/撤销、bot 写库全部同源。请求带 `?cv=版本信标`（build 时烘焙 `static/version.txt`，页面注入 `window.CHAIMI_VER`），日志可分辨各客户端前端版本。
 
 **SSE 仅用于 AI 流式**（对话/月报）：ai 内部为结构化事件流（生成器产 dict，HTTP 边界 `sse_stream` 统一序列化），bot 通道直接消费同一生成器，不二次解析文本。
 
@@ -66,11 +71,11 @@ OpenClaw ──MCP/REST──▶ /api/bot(B网关) ──┘
 ## 三、目录结构
 
 ```
-lulu-ledger/
+chaimi-ledger/
 ├── DESIGN.md / README.md / LICENSE
 ├── build.bat                    # 读 manifest 版本 → 烘焙 version.txt → py_compile 自检
 │                                #   → 清理开发数据(app/data) → fnpack 打包
-└── lulu-ledger-fn/
+└── chaimi-ledger-fn/
     ├── manifest                 # 飞牛应用清单（appname/version/install_dep_apps=python312…）
     ├── config/                  # resource（api-scope）/ privilege（run-as: root）
     ├── cmd/                     # 生命周期脚本：main(start/stop/status)、install_init(装依赖)、
@@ -78,7 +83,7 @@ lulu-ledger/
     ├── wizard/                  # 卸载向导
     └── app/
         ├── server/              # config（桌面注册 iframe）/ images（图标、牛牛头像，禁缓存路由）
-        ├── skills/lulu-ledger/  # OpenClaw 技能包（SKILL.md，B 通道备选形态）
+        ├── skills/chaimi-ledger/  # OpenClaw 技能包（SKILL.md，B 通道备选形态）
         ├── src/                 # 后端源码（见模块清单）
         └── static/              # 前端（app.html/home.html/*.js/base.css/views.css/Chart.js）
 ```
@@ -110,7 +115,7 @@ PRAGMA journal_mode=WAL; busy_timeout=5000; foreign_keys=ON;
 
 ***
 
-## 五、API 概览（前缀 /app/lulu-ledger）
+## 五、API 概览（前缀 /app/chaimi-ledger）
 
 ```
 页面     GET /                    app.html      GET /home   登录/选用户页
@@ -156,7 +161,7 @@ AI       GET /api/ai/chat（SSE 对话：记账出草稿/查账回统计）  POS
 - 礼金规则单源（`_GIFT_RULE`）：＜200 的红包/转账归红包礼金、不进人情往来，词典/映射/AI 三处同口径
 - **隐私哲学**：每词只发「一句话/一张图 + 分类账户清单 + 50 条少样本 + 聚合统计」，从不发全量账单；数据存储全本地
 
-**配置**（lulu.conf，设置页向导填写）：
+**配置**（chaimi.conf，设置页向导填写）：
 
 ```json
 "llm":   {"base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "api_key": ""},
@@ -165,29 +170,36 @@ AI       GET /api/ai/chat（SSE 对话：记账出草稿/查账回统计）  POS
 
 ***
 
-## 七、账单导入（import_bill.py）
+## 七、账单导入（import_* 模块族 + platform_templates.py）
 
-**支持来源**：支付宝（CSV/GBK）、微信（**xlsx**，openpyxl）、京东（CSV/UTF-8 BOM）、本应用导出（export，CSV/xlsx；'cashbook' 仅作历史存量行 source 识别）。xlsx 按首 sheet 表头分流到对应解析器。
+**模块结构**：`import_bill.py`（门面：统一入口 + 解析引擎与原语）+ `import_classify.py`（分类瀑布）+ `import_match.py`（快照/退款链/跨源与手动配对）+ `import_apply.py`（入库/撤销）+ `import_common.py`（叶子工具）+ `platform_templates.py`（五平台声明数据）。回归保障双保险：**解析级黄金快照**（文件→RawFlow）+ **预览级黄金快照**（RawFlow→FlowPreview，带状态账本），任何解析/分类/匹配变更须逐字段等价或显式再冻结。
+
+**统一模板引擎**：支付宝/微信/京东（2026-10 新导出）/本应用导出/美团全部为**内置模板**（声明数据随应用发版），与用户模板（`chaimi.conf`，向导写入，用于未知新格式）走同一条执行路径 `parse_template`。路由按**表头集合匹配**：用户模板优先 → 内置互斥保序；平台调整导出格式时随应用更新内置模板。xlsx 统一转 CSV 行后参与匹配；GBK/UTF-8 双解码。模板 schema = v1 向导字段 + 引擎扩展（`refund_rules` 退款规则含方向守卫、`transfer_types` 不计收支集合、`name_fallback` 名称回退链、`expand` 京东括号取原消费+括号退款额、`two_pass` 导出批内直连、`hash_fields` 去重字段集等），未知字段显式报错。
+
+**支持来源**：支付宝（CSV/GBK）、微信（xlsx，CSV 亦可）、京东（2026-10 新导出 CSV：退款独立成行）、本应用导出（CSV/xlsx）、美团（CSV）、任意自定义格式（向导模板）。
 
 **流程（预览制）**：
 
 ```
-上传 → parse_bill 解析(不入库) → 预览页（need_confirm 高亮 / duplicate 灰显 / 疑似重复提示）
-     → 用户确认 → apply_import（跳过重复行，先写批次再批量入库，learn 回写映射）
-     → 低置信项照常入库打标，事后在「待确认」队列页处理；支持整批撤销（级联清理退款关联与学习映射）
+上传 → parse_bill 解析(不入库) → 预览页（分类依据悬浮 / duplicate 灰显 / 跨源与手动重复置顶可恢复
+     / 疑似重复提示 / 全重复时提示先撤销原批次）
+     → 用户确认（改分类才回写学习映射）→ apply_import 四阶段（增强回填→批次→插入+learn+批内退款回填→rescan）
+     → 低置信项照常入库打标，事后在「待确认」队列处理；支持整批撤销
 ```
 
-**类型分流**：支出→expense；收入→income（微信 `-退款` 后缀强制 transfer）；不计收支（转账/理财/还款/充值）→transfer 子类（资金搬运，不计收支），退款行触发退款匹配。
+**类型分流**（模板驱动）：退款规则命中→transfer 并触发退款匹配（微信「已全额退款」支出行有方向守卫防误判）；类型列命中 transfer 集合→transfer 子类（资金搬运不计收支）；其余按收/支枚举，未命中一律 transfer。
 
-**退款匹配**（分层，低置信 need_confirm 不阻断导入）：① 订单号精确（全额首选）→ ② 商户+金额（支付宝「退款-」前缀高置信；京东商品名被平台改写，降级模糊匹配）→ ③ 启发式（金额+日期窗）→ ④ AI 辅助多候选 → ⑤ 未命中独立 transfer 待手动关联。跨账本不匹配；原消费后导入时反向扫描补关联。
+**分类瀑布**（支出/收入行五级，先中先赢）：① 关键词词典（产品例外→加油词→车牌正则→15 类词典序；人情类按小额二切红包礼金/人情往来）→ ② 映射表（默认+学习；映射到退款/不计收支组则整行转 transfer）→ ②' 同名直连（导出格式）→ ③ AI 兜底（单次生效不学习）→ ④ 硬兜底"其他"+待确认。**只学用户纠正**，自动结果一律不回写映射表。转账行走子类映射（TRANSFER_SUBCLASS，未知子类待确认）。
 
-**去重**：row_hash 整行哈希（稳定身份字段 + 金额归一化去退款标记，同笔交易二次导入哈希一致），(ledger_id, source, row_hash) 批量比对；另有 **dup_hints 疑似重复软提示**——(日期, 类型, 金额) 三元组相同只提示不拦截（防手动/AI 记过又导入平台账单的真实重复）。
+**退款匹配**（分层链，**同额优先贯穿全线**，宁低勿错）：① 订单号（同单多行优先等额；唯一=同订单部分退款直连）→ ② 金额+名称（等额+前缀唯一=high；模糊按同额>相似度>新旧；多候选取最近降 low）→ ②' 微信专属（商户+等额；红包/转账 30 天等额，多候选优先交易对方相同）→ ②'' 括号退款额（京东子件部分退款：退款额=原消费括号标注额，跨批经 tags 持久化）→ ③ 启发式（≥额+90 天窗唯一，多候选恰有一笔等额则链等额）。出口：high 免确认自动扣减（归因原消费日期）/ low 待确认队列 / unmatched 队列。兜底：原消费后导入时 rescan 反向补关联；批内退款对负序号回填；每笔决策写日志（`chaimi.import`）。
 
-**上传安全**：20MB 上限、扩展名白名单、xlsx 先查 zip 魔数防伪装、限解压行数防炸弹、临时文件即用即删。
+**去重四道防线**（共用一次账本快照，含 (类型,金额) 索引与 hash 索引）：row_hash 精确去重（单号进 hash，同文件重导全跳）→ 跨源配对（平台↔渠道三层证据，同日±1 同额须唯一）→ **手动记账配对**（同日±1+等额+同类型，唯一候选+1:1 消耗，防先手记后导账单双计；增强只补单号不碰手填名称）→ 疑似重复软提示（三元组只提醒不拦截）。同日多笔同额（多次停车等同额真实消费）由单号进 hash、唯一性门槛、1:1 消耗三重保护全部正常入库。
 
-**导出回环**：导出 14 列（转账双账户、订单号、流水ID、退款关联），再导入零待确认零重复，退款关联/双账户/归属全部无损还原。
+**上传安全**：20MB 上限、扩展名白名单、xlsx 魔数校验、5 万行熔断、临时文件即用即删。
 
-> 各平台逐列解析规则、默认映射表与二级关键词词表以代码为准：`import_bill.py`、`db.DEFAULT_MAPPINGS`、`SUBCATEGORY_LEXICON`。
+**导出回环**：导出 14 列（转账双账户、订单号、流水ID、退款关联），再导入零待确认零重复，退款关联/双账户/归属无损还原（两代列名由列别名兼容）。
+
+> 模板字段规范与各平台声明以代码为准：`platform_templates.py`、`import_bill.py`（引擎+原语）、`db.DEFAULT_MAPPINGS`。
 
 ***
 
@@ -264,7 +276,7 @@ A（直连）/B（网关）只是「谁持有微信通道」的差别，共用 b
 
 ### 10.3 通道 A：bot_ilink.py（iLink 直连）
 
-- **QR 登录**：设置页发起 → 渲染二维码 → 手机微信扫 → 轮询状态至 logged_in，凭证 `{account_id, token, base_url}` 落 lulu.conf
+- **QR 登录**：设置页发起 → 渲染二维码 → 手机微信扫 → 轮询状态至 logged_in，凭证 `{account_id, token, base_url}` 落 chaimi.conf
 - **长轮询线程**：daemon 线程循环（getupdates 挂起 ~35s），单 in-flight 守卫；**按 msg_id 去重**（最近 200 条 LRU，重连/重投只处理一次）；回复 POST 必须回传 `context_token`
 - **收图**（小票识别）：广谱检测媒体线索 → CDN 下载（三种 URL 形态）→ AES-128-ECB + PKCS7 解密（密钥三形态兼容，依赖 pycryptodome）→ 落盘 receipts → parse_receipt → 草稿卡
 - **凭证生命周期**：过期收 401 → 线程停、面板亮「凭证过期请重新扫码」（重扫必须人扫，无自动续期）
@@ -273,11 +285,11 @@ A（直连）/B（网关）只是「谁持有微信通道」的差别，共用 b
 ### 10.4 通道 B：REST + MCP（外部 Agent 网关）
 
 - `POST /api/bot/message` / `POST /api/bot/receipt` / `GET /api/bot/status`，`Authorization: Bearer {bot.api_token}`；同步接口，LLM 解析 2~10s、查账可 20s+，网关侧超时设 120s
-- 真机 cmd 以 `--uds` 起 server，HTTP 进不了 Unix socket——server 在 UDS 之外并行监听 TCP（`_sidecar_apply`：**仅 gateway 模式启动**、随 bot.mode 热切换优雅启停，默认部署不常驻白跑端口；`LULU_BOT_BIND` 默认 127.0.0.1，端口默认 18710（`LULU_BOT_PORT` 可覆盖），跨容器置 0.0.0.0，off 关闭）
-- **lulu_mcp.py**（stdio MCP server，三工具）：`ledger_message`（原样转发）/ `ledger_receipt` / `ledger_status`。工具描述写死约束：凡涉记账查账必须原样调用 ledger_message，禁止网关 LLM 自行解析金额、编造账目——lulu 的调优提示词是唯一大脑，OpenClaw 只当管道
-- `skills/lulu-ledger/`：纯 REST 技能包（SKILL.md），与 MCP 二选一，随 fpk 上机
+- 真机 cmd 以 `--uds` 起 server，HTTP 进不了 Unix socket——server 在 UDS 之外并行监听 TCP（`_sidecar_apply`：**仅 gateway 模式启动**、随 bot.mode 热切换优雅启停，默认部署不常驻白跑端口；`CHAIMI_BOT_BIND` 默认 127.0.0.1，端口默认 18710（`CHAIMI_BOT_PORT` 可覆盖），跨容器置 0.0.0.0，off 关闭）
+- **chaimi_mcp.py**（stdio MCP server，三工具）：`ledger_message`（原样转发）/ `ledger_receipt` / `ledger_status`。工具描述写死约束：凡涉记账查账必须原样调用 ledger_message，禁止网关 LLM 自行解析金额、编造账目——柴米的调优提示词是唯一大脑，OpenClaw 只当管道
+- `skills/chaimi-ledger/`：纯 REST 技能包（SKILL.md），与 MCP 二选一，随 fpk 上机
 
-### 10.5 配置与热切换（lulu.conf `bot` 段）
+### 10.5 配置与热切换（chaimi.conf `bot` 段）
 
 ```json
 "bot": {
@@ -308,12 +320,12 @@ A（直连）/B（网关）只是「谁持有微信通道」的差别，共用 b
 
 ```
 build.bat：读 manifest 版本 → 烘焙 static/version.txt → py_compile 自检 → 清理 app/data 开发残留
-          → fnpack 打包 → lulu-ledger.<版本>.fpk
+          → fnpack 打包 → chaimi-ledger.<版本>.fpk
 NAS 安装：install_init ─▶ pip --target ${PKGVAR}/site-packages（清华/阿里源兜底）
 cmd/main：系统 python3 + PYTHONPATH=site-packages 直跑；启动时依赖双保险补装
 ```
 
-**备份哲学**：SQLite 开 WAL 后直接拷 .db 会得到不一致快照，必须用 `sqlite3.Connection.backup()` 或 `VACUUM INTO`（backup.py 实现）；备份 = db 副本 + lulu.conf 副本，建议每日一次、保留 7 日；恢复 = 停写 → 覆盖 → `PRAGMA integrity_check` → 重启。小票图片存 `${TRIM_PKGVAR}/receipts/`，库内只存相对路径。
+**备份哲学**：SQLite 开 WAL 后直接拷 .db 会得到不一致快照，必须用 `sqlite3.Connection.backup()` 或 `VACUUM INTO`（backup.py 实现）；备份 = db 副本 + chaimi.conf 副本，建议每日一次、保留 7 日；恢复 = 停写 → 覆盖 → `PRAGMA integrity_check` → 重启。小票图片存 `${TRIM_PKGVAR}/receipts/`，库内只存相对路径。
 
 ***
 
@@ -332,10 +344,4 @@ cmd/main：系统 python3 + PYTHONPATH=site-packages 直跑；启动时依赖双
 
 ## 十三、版本里程碑
 
-对外可安装版本共两个（与 manifest / git 标签 / `CHANGELOG.md` 一致）。开发期内部迭代（v1.0 ~ v1.40）收敛后冻结为 v1.0.0 基线（git 标签 `v1.0.0`），未对外发版、演进明细不再单列；此后变更一律记 `CHANGELOG.md`。
-
-| 时间 | 版本 | 内容 |
-|---|---|---|
-| 2026-10-12 | **v1.0.0** 交付基线 | 功能全集：多账本记账、支付宝/微信/京东账单导入（自动分类 + 退款匹配 + 去重）、统计看板（日历/饼图/趋势/人情往来）、AI 记账与查账（一句话/小票/月度分析）、微信机器人双通道（iLink 直连 + 网关/MCP）、分层备份；4 份真实账单端到端验证（净支出与官方汇总精确到分一致） |
-| 2026-10-13 | **v1.0.1** 交付加固 | 依据《交付评估报告》P0~P2 整改，功能零变化：XSS 转义闭环（11 处）、Bearer 常量时间比较、Web 层可选 Basic Auth（默认关）、git 基线 + 49 用例测试门禁接入 build.bat、依赖精确锁定、applog 日志轮转、AI 无 Key 分类词典兜底、备份与待确认口径修补——明细见 `CHANGELOG.md` |
-| 2026-10-13 | **v1.0.2** 安全加固 + 仓库开源化 | CSV 公式注入中和、备份文件名白名单、图片魔数校验、上传安全闸重构、AI 记一笔分类词典兜底 + 前端两段式匹配；manifest 补仓库地址、build.bat 本地专用、文档重构；49→59 用例全绿——明细见 `CHANGELOG.md` |
+**1.0.0（2026-10-18）首个正式版**（与 manifest / `CHANGELOG.md` 一致）：功能全集——多账本记账、五平台账单导入（统一模板引擎 + 五级分类瀑布 + 四道去重防线 + 退款五层匹配链）、统计看板、AI 记账与查账、微信机器人双通道、分层备份；148 用例 + 双级黄金快照打包门禁，多份真机账单端到端验证。此前的内部迭代（含更名前 lulu-ledger 时期的基线与 1.1~1.11 序列）随定版收敛，演进明细见 git 历史与 `CHANGELOG.md` 追加注记；此后变更一律记 `CHANGELOG.md`。

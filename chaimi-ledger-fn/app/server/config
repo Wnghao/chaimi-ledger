@@ -1,0 +1,17 @@
+{
+    ".url": {
+        "chaimi-ledger.web": {
+            "title": "柴米记账",
+            "icon": "images/icon-{0}.png",
+            "type": "iframe",
+            "protocol": "",
+            "gatewayPrefix": "/app/chaimi-ledger",
+            "gatewaySocket": "app.sock",
+            "url": "/app/chaimi-ledger",
+            "allUsers": false,
+            "control": {
+                "accessPerm": "readonly"
+            }
+        }
+    }
+}

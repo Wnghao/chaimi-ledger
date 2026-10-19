@@ -69,7 +69,7 @@ class TestTokenOk(unittest.TestCase):
 
 
 class TestBasicAuth(unittest.TestCase):
-    CFG = {"username": "lulu", "password": "s3cret"}
+    CFG = {"username": "chaimi", "password": "s3cret"}
 
     @staticmethod
     def _hdr(user, pwd):
@@ -77,8 +77,8 @@ class TestBasicAuth(unittest.TestCase):
         return "Basic " + base64.b64encode(f"{user}:{pwd}".encode()).decode()
 
     def test_ok_and_rejects(self):
-        self.assertTrue(server._basic_auth_ok(self._hdr("lulu", "s3cret"), self.CFG))
-        self.assertFalse(server._basic_auth_ok(self._hdr("lulu", "wrong"), self.CFG))    # 错密码
+        self.assertTrue(server._basic_auth_ok(self._hdr("chaimi", "s3cret"), self.CFG))
+        self.assertFalse(server._basic_auth_ok(self._hdr("chaimi", "wrong"), self.CFG))    # 错密码
         self.assertFalse(server._basic_auth_ok(self._hdr("admin", "s3cret"), self.CFG))  # 错用户
         self.assertFalse(server._basic_auth_ok("Bearer abc", self.CFG))                  # 非 Basic
         self.assertFalse(server._basic_auth_ok("Basic !!!not-base64!!!", self.CFG))      # 坏 base64
