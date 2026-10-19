@@ -25,6 +25,16 @@
 
 设计细节见 [DESIGN.md](DESIGN.md)（架构 / 数据库 / API / AI / 导入 / 微信机器人全设计）。
 
+## 📸 界面演示
+
+| AI 记一笔 · 收支概览 | 日历收支热力 |
+|:---:|:---:|
+| ![AI 记一笔](screenshots/01-ai-home.png) | ![日历收支热力](screenshots/02-calendar-light.png) |
+| **统计看板** | **流水与筛选** |
+| ![统计看板](screenshots/03-stats-light.png) | ![流水与筛选](screenshots/04-list-light.png) |
+| **账单导入预览** | **深色模式** |
+| ![账单导入预览](screenshots/05-import-preview.png) | ![深色模式](screenshots/06-stats-dark.png) |
+
 ## 🚀 部署
 
 ### 部署前提（重要）
@@ -77,6 +87,7 @@ build.bat
 chaimi-ledger/
 ├── DESIGN.md            # 设计文档（架构/数据库/API/AI/导入/微信机器人）
 ├── build.bat            # fpk 打包脚本
+├── screenshots/         # 界面截图（README 演示，兼应用商店上架提交材料）
 └── chaimi-ledger-fn/
     ├── manifest         # 飞牛应用清单
     ├── cmd/             # 飞牛生命周期脚本（安装/升级/启停回调）
