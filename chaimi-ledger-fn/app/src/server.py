@@ -121,11 +121,14 @@ async def strip_gateway_prefix(request: Request, call_next):
 _auto_backup = backup.AutoBackup()
 _ilink = bot_ilink.ILinkManager()   # 通道 A：多凭证管理(一账本一用户一机器人)
 _REV = {"n": 0}                     # 数据变更计数(写库时 +1,长轮询 /api/rev/wait 按此唤醒前端刷新)
-_REV_EV = threading.Event()
+_REV_COND = threading.Condition()  # Condition+wait_for：锁内原子判定谓词，杜绝 Event「检查与挂起之间
+                                   # set() 被先醒者 clear() 吃掉」的丢失唤醒（该竞态会让某端变更后
+                                   # 延迟整整一个 hold 周期才刷新）
 
 def _bump_rev() -> None:
-    _REV["n"] += 1
-    _REV_EV.set()
+    with _REV_COND:
+        _REV["n"] += 1
+        _REV_COND.notify_all()
 
 def _bot_cfg() -> dict:
     """bot 配置段便捷读取（段缺失回退空 dict）；写路径各自 load/save 整份配置。"""
@@ -1590,12 +1593,10 @@ def rev_wait(since: int = -1, hold: int = 25):
     (<60s 网关掐杀线),缓冲网关下照常送达——与 AI 聊天流可用同理。前端循环调用,
     变更后 1s 内刷新。"""
     deadline = time.time() + max(1, min(hold, 30))
-    while time.time() < deadline:
-        if _REV["n"] != since:
-            break
-        _REV_EV.wait(timeout=max(0.1, deadline - time.time()))
-        _REV_EV.clear()
-    return {"rev": _REV["n"]}
+    with _REV_COND:
+        _REV_COND.wait_for(lambda: _REV["n"] != since,
+                           timeout=max(0.1, deadline - time.time()))
+        return {"rev": _REV["n"]}
 
 @app.post("/api/bot/token")
 def bot_token():
