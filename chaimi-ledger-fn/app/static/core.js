@@ -521,6 +521,7 @@ async function txPostItems(items, meta){   // 逐笔 POST；失败时抛错并�
 }
 function afterTxWrite(){   // 记账成功后统一刷新各页数据
   loadTx(); loadPendingBadge(); refreshStats(); loadSumbarAi(); loadSumbarList(); loadRenqing(); aiToday();
+  if(document.body.dataset.page === "io") loadBatches();   // 停在导入页时，远端导入/撤销也同步批次表
 
   if($("#dayMask").classList.contains("on") && dayRefresh) dayRefresh();
 }
