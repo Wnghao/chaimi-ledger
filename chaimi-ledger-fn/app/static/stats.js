@@ -339,9 +339,9 @@ async function refreshStats(){
       `<div class="attr-b-axis"><span class="l">← 支出</span><span class="c"></span><span class="r">收入 →</span></div>` +
       attrs.map((a, i) => `
         <div class="attr-b-row">
-          <div class="attr-b-half left">${amtLabel(a.expense)}<div class="attr-b-bar exp" style="width:${barW(a.expense)}%" onclick="showTxDetail('${qEsc(a.person)} 支出明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'expense'})"></div></div>
+          <div class="attr-b-half left">${amtLabel(a.expense)}<div class="attr-b-bar exp" style="width:${barW(a.expense)}%" onclick="showTxDetail('${qEsc(a.person)} 支出明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'expense',attribution:'${qEsc(a.person)}'})"></div></div>
           <div class="attr-b-center" onclick="attrDetailToggle(${i})">${esc(a.person)}</div>
-          <div class="attr-b-half"><div class="attr-b-bar inc" style="width:${barW(a.income)}%" onclick="showTxDetail('${qEsc(a.person)} 收入明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'income'})"></div>${amtLabel(a.income)}</div>
+          <div class="attr-b-half"><div class="attr-b-bar inc" style="width:${barW(a.income)}%" onclick="showTxDetail('${qEsc(a.person)} 收入明细',{from:'${statRange.from}',to:'${statRange.to}',toExclusive:true,type:'income',attribution:'${qEsc(a.person)}'})"></div>${amtLabel(a.income)}</div>
         </div>`).join("");
 
     // 下方保留可展开列表（分组/成员明细）

@@ -520,7 +520,8 @@ _RENQING_CAT_SQL = ("t.category_id IN (SELECT id FROM categories "
 @app.get("/api/transactions")
 def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str = "", type: str = "",
                       category: int = 0, need_confirm: bool = False, q: str = "",
-                      renqing_name: str = "", to_exclusive: bool = False,
+                      renqing_name: str = "", attribution: str = "",
+                      to_exclusive: bool = False,
                       page: int = 1, page_size: int = 50):
     sql = ["SELECT t.*, c.name AS category_name, a.name AS account_name, "
            "ro.id AS ro_id, ro.date AS ro_date, ro.name AS ro_name, ro.note AS ro_note, "
@@ -578,6 +579,19 @@ def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str
         sql.append(f"AND {_RENQING_CAT_SQL}")
         sql.append(f"AND {RENQING_NAME_SQL} = ?")
         args += [ledger, renqing_name]
+    if attribution:
+        # 归属下钻（统计页蝴蝶图条形）：与 /api/stats/attribution 同口径。
+        # 分组行传组名（_ATTR_EXPR 双路径：名单映射/直名建组）；未分组行传
+        # 「归属名·平台」统计键，剥后缀反解回 source 一并过滤
+        base, _, plat = attribution.rpartition("·")
+        src = {"支付宝": "alipay", "微信": "wechat", "京东": "jd", "美团": "meituan"}.get(plat)
+        if not src:
+            base = attribution
+        sql.append(f"AND {_ATTR_EXPR}=?")
+        args.append(base)
+        if src:
+            sql.append("AND t.source=?")
+            args.append(src)
     where = " ".join(sql)
     total = conn().execute(f"SELECT COUNT(*) FROM ({where})", args).fetchone()[0]
     rows = conn().execute(f"{where} ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?",
