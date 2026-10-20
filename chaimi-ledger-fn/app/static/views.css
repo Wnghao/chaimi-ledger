@@ -138,7 +138,23 @@
 .tx-selbar{display:flex;align-items:center;gap:12px}
 .tx-sel-all{display:flex;align-items:center;gap:6px;font-size:14px;cursor:pointer;margin:0}   /* margin:0 抵消全局 label{margin-bottom:4px}，否则全选比已选计数高 2px */
 .tx-sel-all span{line-height:20px}   /* 与 20px 勾选框共基线，避免与已选计数错位 */
-#txSelCount{line-height:20px}
+#txSelCount,#daySelCount{line-height:20px}
+/* 流水页钉顶：筛选区（类型chips+搜索+编辑按钮；选择态时为 全选/修改/完成 工具条）整体
+   fixed 紧贴固定顶栏下缘——与 #txPager 同款方案；不用 sticky：部分手机 WebView 内
+   sticky 失效（见 base.css .gbar 注释），真机实测会整条滚走。
+   gbarFit 写入的 --gbar-h 含 +8px 正文留白，这里 calc 扣回，紧贴顶栏 border-bottom。
+   外层通栏背景（同 .gbar 做法），内容层 .txf-pin 限宽居中与 .page 列表对齐 */
+#tab-list .tx-filter{position:fixed;top:calc(var(--gbar-h,96px) - 8px);left:0;right:0;z-index:5;
+  margin:0;padding:8px 0 6px;background:var(--bg)}   /* 不加 border-bottom：搜索框/卡片自带边框，通栏分隔线多余 */
+@media(min-width:769px){#tab-list .tx-filter{left:200px}}   /* 与 #txPager 一致，让位桌面常驻侧栏 */
+#tab-list .txf-pin{width:100%;max-width:1400px;margin:0 auto;padding:0 clamp(16px,4vw,64px);
+  display:flex;flex-direction:column;gap:10px}   /* width:100% 必需：父级纵向 flex 里 auto 边距会取消拉伸致收缩 */
+@media(max-width:768px){
+  #tab-list .txf-pin{padding:0 8px}   /* 与 #tab-list 手机 8px 留空对齐，卡片/筛选同缘 */
+}
+/* 详情弹窗：.modal-day 三段式（head+工具条固定、body 滚动），工具条为普通条带即天然钉顶；
+   不加 border-bottom/背景（与主页钉顶区同口径：上缘由 head 的下边线分隔，底色沿用弹窗卡底） */
+#daySelBar{flex:0 0 auto;padding:10px 20px}
 .tx-sel{flex:0 0 auto;display:flex;align-items:center;cursor:pointer;padding:4px}
 .tx-sel input,.tx-sel-all input{width:20px;height:20px;accent-color:var(--primary)}
 #txSelMask label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}

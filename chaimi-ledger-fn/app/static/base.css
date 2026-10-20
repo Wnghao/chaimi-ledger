@@ -257,6 +257,10 @@ body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="set
 .modal .grid3>div{min-width:0;margin-top:8px}
 /* 预览模态框：宽屏 + head/body/foot 三段式 */
 .modal-pv{max-width:980px;display:flex;flex-direction:column;overflow:hidden}
+/* 明细弹窗（当日流水/下钻/人情）：head+选择态工具条固定、仅 body 滚动——
+   不用 sticky（部分手机 WebView 内 sticky 失效，见 .gbar 注释），结构天然钉顶；
+   body 直接复用下方 .modal-body（overflow:auto/flex:1） */
+.modal-day{display:flex;flex-direction:column;overflow:hidden}
 /* 弹窗渐变顶条（马卡龙色系，宽度仅 3px 顶部）——视觉锚定但不喧宾夺主 */
 .modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);position:relative}
 .modal-head::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--m-purple),var(--m-blue),var(--m-mint),var(--m-peach));border-radius:var(--radius-lg) var(--radius-lg) 0 0}

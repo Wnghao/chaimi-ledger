@@ -119,25 +119,29 @@
     <!-- ===== 流水 ===== -->
     <section class="page" id="tab-list">
       <div class="tx-filter">
-        <div class="filters" style="align-items:center;margin:0">
-          <button class="fchip on" id="ftBase" data-ft="" onclick="setTypeFilter(this)">最近</button>
-          <button class="fchip tx-type-only" data-ft="expense" onclick="setTypeFilter(this)" style="display:none">支出</button>
-          <button class="fchip tx-type-only" data-ft="income" onclick="setTypeFilter(this)" style="display:none">收入</button>
-          <button class="fchip warn" id="ftConfirm" data-ft="confirm" onclick="setTypeFilter(this)">待确认</button>
-          <button class="btn btn-ghost" id="txEditBtn" style="margin-left:auto;flex:0 0 auto;padding:6px 14px;font-size:13px" onclick="txSelEnter()">编辑</button>
-        </div>
-        <div class="ai-box" id="txSearchBox">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:0 0 16px;opacity:.55"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-          <input id="q_text" type="text" name="tx-search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="搜索：名称 / 备注 / 金额 / 商户 / 分类 / 流水归属 / 订单号" oninput="onQText()" onkeydown="onQKey(event)">
-          <button class="icon-btn" id="q_clear" style="display:none;border:none;width:26px;height:26px" onclick="clearQText()" title="清空"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        </div>
-        <!-- 选择态工具条：左=全选+已选数，右=修改/完成 -->
-        <div class="tx-selbar" id="txSelBar" style="display:none">
-          <label class="tx-sel-all"><input type="checkbox" id="txSelAll" onchange="txSelToggleAll(this.checked)"><span>全选</span></label>
-          <span class="sub" id="txSelCount">已选 0 笔</span>
-          <span class="spacer"></span>
-          <button class="btn btn-pri" id="txSelModBtn" onclick="txSelOpenModal()" disabled>修改</button>
-          <button class="btn btn-ghost" onclick="txSelExit()">完成</button>
+        <!-- .txf-pin：钉顶筛选区的内容层，与 .page 同宽同留空（max-width 1400 居中）；
+             外层 .tx-filter fixed 通栏背景，滚动时列表从其下穿过 -->
+        <div class="txf-pin">
+          <div class="filters" style="align-items:center;margin:0">
+            <button class="fchip on" id="ftBase" data-ft="" onclick="setTypeFilter(this)">最近</button>
+            <button class="fchip tx-type-only" data-ft="expense" onclick="setTypeFilter(this)" style="display:none">支出</button>
+            <button class="fchip tx-type-only" data-ft="income" onclick="setTypeFilter(this)" style="display:none">收入</button>
+            <button class="fchip warn" id="ftConfirm" data-ft="confirm" onclick="setTypeFilter(this)">待确认</button>
+            <button class="btn btn-ghost" id="txEditBtn" style="margin-left:auto;flex:0 0 auto;padding:6px 14px;font-size:13px" onclick="txSelEnter()">编辑</button>
+          </div>
+          <div class="ai-box" id="txSearchBox">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:0 0 16px;opacity:.55"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="q_text" type="text" name="tx-search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="搜索：名称 / 备注 / 金额 / 商户 / 分类 / 流水归属 / 订单号" oninput="onQText()" onkeydown="onQKey(event)">
+            <button class="icon-btn" id="q_clear" style="display:none;border:none;width:26px;height:26px" onclick="clearQText()" title="清空"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+          <!-- 选择态工具条：左=全选+已选数，右=修改/完成 -->
+          <div class="tx-selbar" id="txSelBar" style="display:none">
+            <label class="tx-sel-all"><input type="checkbox" id="txSelAll" onchange="txSelToggleAll(this.checked)"><span>全选</span></label>
+            <span class="sub" id="txSelCount">已选 0 笔</span>
+            <span class="spacer"></span>
+            <button class="btn btn-pri" id="txSelModBtn" onclick="txSelOpenModal()" disabled>修改</button>
+            <button class="btn btn-ghost" onclick="txSelExit()">完成</button>
+          </div>
         </div>
       </div>
       <div class="card" id="txList" style="padding:6px"></div>
@@ -184,17 +188,26 @@
   </div>
 </div>
 
-    <!-- 当日流水弹窗 -->
+    <!-- 当日流水弹窗（日历/统计下钻/人情明细共用；右上「编辑」进选择态，工具条钉在弹窗顶部不随列表滚动） -->
     <div class="modal-mask" id="dayMask" onclick="if(event.target===this)closeDay()">
-      <div class="modal">
+      <div class="modal modal-day">
         <div class="modal-head">
           <b id="dayTitle">当日流水</b>
           <span style="display:flex;align-items:center;gap:10px;min-width:0">
             <b class="num" id="daySummary" style="font-size:13px"></b>
+            <button class="btn btn-ghost" id="dayEditBtn" style="display:none;flex:0 0 auto;padding:4px 12px;font-size:12px" onclick="txSelEnter('#dayList')">编辑</button>
             <button class="icon-btn" onclick="closeDay()" title="关闭">✕</button>
           </span>
         </div>
-        <div style="padding:18px 20px 20px">
+        <!-- 选择态工具条：head/工具条固定、仅下方 body 滚动（.modal-day 三段式），列表再长也钉在弹窗顶部 -->
+        <div class="tx-selbar" id="daySelBar" style="display:none">
+          <label class="tx-sel-all"><input type="checkbox" id="daySelAll" onchange="txSelToggleAll(this.checked)"><span>全选</span></label>
+          <span class="sub" id="daySelCount">已选 0 笔</span>
+          <span class="spacer"></span>
+          <button class="btn btn-pri" id="daySelModBtn" onclick="txSelOpenModal()" disabled>修改</button>
+          <button class="btn btn-ghost" onclick="txSelExit()">完成</button>
+        </div>
+        <div class="modal-body" style="padding:18px 20px 20px">
           <div id="dayList"></div>
           <div id="dayActions" style="display:none;margin-top:14px"></div>
         </div>

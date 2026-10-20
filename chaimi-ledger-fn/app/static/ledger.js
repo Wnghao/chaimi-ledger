@@ -71,6 +71,7 @@ async function loadTx(){
   }).join("") ||
     `<div class="empty"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/></svg>暂无流水</div>`;
   txSelDecorate();
+  txFilterPad();   // 筛选区 fixed 脱流：按当前 chips/搜索框实际高度重算列表顶部留白
 }
 function netSum(items, absorbed){
   let e = 0, i = 0;
@@ -102,11 +103,11 @@ async function txPage(d){
   if(target === txPageNo) return;
   txPageNo = target;
   await loadTx();
-  // .main 是滚动容器（body 锁滚动），--gbar-h 为固定顶栏实测高度，
-  // 让出该高度后筛选栏恰好落在顶栏下方，列表首行紧随其后
-  const sc = $(".main"), el = $("#tab-list .tx-filter");
-  const gbarH = parseFloat(getComputedStyle(document.body).getPropertyValue("--gbar-h")) || 96;
-  const top = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - gbarH;
+  // .main 是滚动容器（body 锁滚动）。筛选区 fixed 钉顶、rect 恒定，
+  // 翻页后让 #txList 顶端落在钉顶区下缘正下方（省去复算顶栏高+筛选区高的 calc 算式）
+  const sc = $(".main");
+  const top = sc.scrollTop + $("#txList").getBoundingClientRect().top
+            - $("#tab-list .tx-filter").getBoundingClientRect().bottom - 4;
   sc.scrollTo({top:Math.max(0,top), behavior:"smooth"});
 }
 async function exportReceipts(){
@@ -158,7 +159,10 @@ async function expSetRange(mode){
 /* ===== 编辑/确认弹窗 ===== */
 let curDay = "";
 let dayRefresh = null;
-function closeDay(){ $("#dayMask").classList.remove("on"); curDay = ""; dayRefresh = null; }
+function closeDay(){
+  if(daySelOn()) txSelExit(false);   // 弹窗整个关掉：静默退出选择态（无需重拉）
+  $("#dayMask").classList.remove("on"); curDay = ""; dayRefresh = null;
+}
 function viewReceipt(p){ if(!p) return; $("#rcpImg").src = p.replace(/^\//,"").split("?")[0] + "?t=" + Date.now(); $("#rcpMask").classList.add("on"); }
 function closeReceipt(){ $("#rcpMask").classList.remove("on"); $("#rcpImg").src = ""; closeCrop(); }
 
@@ -225,6 +229,8 @@ async function applyCrop(){
   finally{ btn.disabled = false; btn.textContent = "确认裁剪"; }
 }
 function showDetail(title, html, actions){
+  if(daySelOn()) txSelExit(false);   // 连开下一份明细：先退出上一份的选择态
+  $("#dayEditBtn").style.display = "none";   // 载入中先藏，取数渲染完由 dayEditVis 按内容显隐
   $("#dayTitle").textContent = title;
   $("#daySummary").textContent = "";
   const a = $("#dayActions");
@@ -250,6 +256,7 @@ async function fillDayDetail(fetcher){   // 明细弹窗统一取数渲染（日
   }catch(e){
     $("#dayList").innerHTML = `<div class="sub">加载失败：${esc(e.message)}</div>`;
   }
+  dayEditVis();   // 成败都按当前内容重估「编辑」按钮（空列表/加载失败均应隐藏）
 }
 async function showDay(dd){
   curDay = dd;
@@ -284,7 +291,7 @@ async function showCategoryDetail(catName, range, type){
   // 旧的「拉区间前 200 条再前端过滤」在区间流水多时会漏掉该分类的流水。
   const top = categories.find(c=>c.name===catName && !c.parent_id && c.type===flow)
            || categories.find(c=>c.name===catName && !c.parent_id);
-  if(!top){ $("#dayList").innerHTML = '<div class="sub">暂无流水</div>'; return; }
+  if(!top){ $("#dayList").innerHTML = '<div class="sub">暂无流水</div>'; dayEditVis(); return; }
   // to 语义与 showTxDetail 一致：toExclusive / 月/年/全部（下一周期排他界）→ to_exclusive=1 裸日期；
   // 仅自定义区间的 to 是含当天的结束日 → 裸日期交服务端膨胀 23:59:59
   const excl = rg.toExclusive || appScope() !== "custom";
@@ -378,6 +385,7 @@ document.addEventListener("click", e=>{
 window.addEventListener("resize", ()=>{
   // 旧版此处无条件 closeRefundDD 会把聚焦中的搜索框 display:none 夺焦、输入法立即收起
   positionRefundDD();
+  txFilterPad();   // 宽度变化 chips 可能换行，筛选区（fixed）高度变了要重算列表留白
   // 窗口变宽回到常驻侧栏布局时，清掉抽屉推挤状态（matchMedia 与 CSS 同口径，见 toggleSidebar 注释）
   if(matchMedia("(min-width:769px)").matches){ $("#sidebar").classList.remove("open"); $("#sideMask").classList.remove("on"); $(".main").classList.remove("pushed"); }
 });
@@ -533,33 +541,59 @@ async function showPersonDetail(person){
 }
 
 let txSelMode = false;
+let txSelHost = "#txList";   // 选择态宿主容器：主列表 #txList / 明细弹窗 #dayList（共用 txSelSet 与批量修改弹窗）
 const txSelSet = new Set();
 
-function txSelEnter(){
+// 明细弹窗选择态进行中（closeDay/showDetail 退出、dayEditVis 让位共用）
+const daySelOn = () => txSelMode && txSelHost === "#dayList";
+
+// 明细弹窗右上「编辑」按钮：有可选流水才露出；选择态进行中让位给钉顶工具条
+function dayEditVis(){
+  $("#dayEditBtn").style.display = !daySelOn() && document.querySelector("#dayList .tx-card[data-txid]") ? "" : "none";
+}
+
+function txSelEnter(host){
+  txSelHost = host || "#txList";
   txSelMode = true; txSelSet.clear();
   txSelVis(true);
   txSelDecorate();
 }
-// 退出选择态：refresh=false 供已另行触发全局刷新的路径（afterTxWrite 内含 loadTx）复用
+// 退出选择态：refresh=false 供已另行触发全局刷新的路径（afterTxWrite 内含 loadTx/dayRefresh）复用
 function txSelExit(refresh = true){
+  const day = txSelHost === "#dayList";
   txSelMode = false; txSelSet.clear();
-  txSelVis(false);
+  txSelVis(false);   // 先按当前宿主还原工具条/编辑按钮/筛选行，再清宿主
+  txSelHost = "#txList";
+  if(day){   // 弹窗内列表需重拉去掉勾选框、恢复点击编辑（重渲染走 fillDayDetail→dayEditVis）
+    if(refresh && dayRefresh && $("#dayMask").classList.contains("on")) dayRefresh();
+    return;
+  }
   if(refresh) loadTx();   // 重渲染去掉勾选框、恢复点击编辑
 }
-// 选择态显隐切换：工具条上、筛选行（含编辑按钮）与搜索框下
+// 选择态显隐（双宿主）：弹窗=钉顶工具条上、编辑按钮让位；主列表=工具条上、筛选行（含编辑按钮）与搜索框下
 function txSelVis(on){
+  if(txSelHost === "#dayList"){
+    $("#daySelBar").style.display = on ? "flex" : "none";
+    dayEditVis();
+    return;
+  }
   $("#txSelBar").style.display = on ? "flex" : "none";
   document.querySelector("#tab-list .tx-filter .filters").style.display = on ? "none" : "";
   document.querySelector("#txSearchBox").style.display = on ? "none" : "";
+  txFilterPad();
 }
-// 当前页卡片 id（全选与全选框状态共用；已被退款吸收的原交易不渲染，天然不在内）
+// 筛选区已 fixed 脱流：按其实时高度给列表补顶部留白（chips 换行/类型切换/选择态切换后都要重算）
+function txFilterPad(){
+  $("#tab-list").style.paddingTop = ($("#tab-list .tx-filter").offsetHeight + 12) + "px";
+}
+// 当前容器卡片 id（全选与全选框状态共用；已被退款吸收的原交易不渲染，天然不在内）
 function txSelPageIds(){
-  return [...document.querySelectorAll("#txList .tx-card[data-txid]")].map(c=>+c.dataset.txid);
+  return [...document.querySelectorAll(txSelHost + " .tx-card[data-txid]")].map(c=>+c.dataset.txid);
 }
-// 渲染后装饰（loadTx 末尾调用，DOM 每次都是新渲染）：给每张卡插勾选框并接管点击
+// 渲染后装饰（loadTx / 弹窗重渲染后调用，DOM 每次都是新渲染）：给每张卡插勾选框并接管点击
 function txSelDecorate(){
   if(!txSelMode) return;
-  document.querySelectorAll("#txList .tx-card").forEach(card=>{
+  document.querySelectorAll(txSelHost + " .tx-card").forEach(card=>{
     const id = +card.dataset.txid;
     if(!id) return;
     const cb = document.createElement("label");
@@ -582,24 +616,35 @@ function txSelToggle(id, on){
 }
 function txSelToggleAll(on){
   txSelPageIds().forEach(id => on ? txSelSet.add(id) : txSelSet.delete(id));
-  document.querySelectorAll("#txList .tx-sel input").forEach(i => i.checked = on);
+  document.querySelectorAll(txSelHost + " .tx-sel input").forEach(i => i.checked = on);
   txSelSyncUI();
 }
 function txSelSyncUI(){
-  $("#txSelCount").textContent = `已选 ${txSelSet.size} 笔`;
-  $("#txSelModBtn").disabled = !txSelSet.size;
+  const p = txSelHost === "#dayList" ? "daySel" : "txSel";   // 两套工具条 id 前缀：主列表 / 明细弹窗
+  $("#" + p + "Count").textContent = `已选 ${txSelSet.size} 笔`;
+  $("#" + p + "ModBtn").disabled = !txSelSet.size;
   const pageIds = txSelPageIds();
-  $("#txSelAll").checked = pageIds.length > 0 && pageIds.every(id => txSelSet.has(id));
+  $("#" + p + "All").checked = pageIds.length > 0 && pageIds.every(id => txSelSet.has(id));
 }
 function txSelCloseModal(){ $("#txSelMask").classList.remove("on"); }
 function txSelOpenModal(){
   if(!txSelSet.size) return;
   $("#txSelModHint").textContent = `将对已选 ${txSelSet.size} 笔流水应用以下修改（留「不修改」的项保持原值）`;
-  // 分类：按支出/收入分组列出
-  const cats = categories.filter(c=>!c.parent_id);
-  const grp = t => `<optgroup label="${t==="expense"?"支出":"收入"}">` +
-    cats.filter(c=>c.type===t).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("") + `</optgroup>`;
-  $("#bs_cat").innerHTML = `<option value="">不修改</option>` + grp("expense") + grp("income");
+  // 分类：按已选流水的实际类型给对应分类——全支出→只列支出分类，全收入→只列收入分类；
+  // 跨支出/收入（或含转账/退款等不计收支）时类型无法统一，分类锁定「不修改」不可选
+  const selTypes = [...new Set([...txSelSet].map(id => (txCache[id]||{}).type))];
+  const oneType = selTypes.length === 1 && (selTypes[0] === "expense" || selTypes[0] === "income") ? selTypes[0] : null;
+  const catSel = $("#bs_cat");
+  if(oneType){
+    catSel.disabled = false;
+    catSel.innerHTML = `<option value="">不修改</option>` +
+      `<optgroup label="${oneType==="expense"?"支出":"收入"}">` +
+      categories.filter(c=>!c.parent_id && c.type === oneType)
+        .map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("") + `</optgroup>`;
+  }else{
+    catSel.disabled = true;
+    catSel.innerHTML = `<option value="">不修改（类型不一致，分类不可改）</option>`;
+  }
   // 归属：分组名 + 未分组归属（与记账弹窗同口径），另给「清除归属」
   const attrNames = attrNamesAll();
   $("#bs_attr").innerHTML = `<option value="">不修改</option>` +

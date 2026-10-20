@@ -199,11 +199,15 @@ function renderSumbar(page, s, range){
     </div>`;
   gbarFit();
 }
-/* 顶栏高度实测写回 --gbar-h（.main 让位 / AI hero 高度都用它） */
+/* 顶栏高度实测写回 --gbar-h（.main 让位 / AI hero 高度 / 钉顶筛选区都用它） */
 function gbarFit(){
   const g = document.getElementById("gbar");
   if(g) document.body.style.setProperty("--gbar-h", (g.offsetHeight + 8) + "px");
 }
+/* 高度自愈：范围条显隐/汇总卡渲染/窄屏换行都会改 gbar 高度，gbarFit 只在汇总刷新时跑，
+   期间钉顶筛选区(calc(var(--gbar-h) - 8px))会按陈旧值定位出间隙——RO 实测即回写保持贴合 */
+const _gbarEl = document.getElementById("gbar");
+if(window.ResizeObserver && _gbarEl) new ResizeObserver(gbarFit).observe(_gbarEl);
 
 async function loadSumbarList(){
   if(!document.getElementById("gsum")) return;
