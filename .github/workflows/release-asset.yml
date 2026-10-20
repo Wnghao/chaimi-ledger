@@ -1,0 +1,24 @@
+name: release-asset
+
+# 发版资产挂载：推 v* 标签时把 dist/ 下的安装包挂到对应 Release。
+# 背景：本机沙箱无法直连 upload.github.com，由 Actions 运行器代传；
+# Release 正文仍由本地脚本按 CHANGELOG 创建（本工作流只补资产，不动正文）。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Attach dist assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/*.fpk --clobber
