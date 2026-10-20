@@ -42,6 +42,7 @@
 本应用为**家庭内网自托管**设计：Web 界面没有应用层登录鉴权，访问控制完全依赖
 飞牛 fnOS 网关与你的局域网边界；机器人网关接口（`/api/bot/*`）则有独立 Bearer Token。
 
+- ✅ 双架构：x86_64 与 ARM（aarch64）NAS 均可安装运行（`platform=all`，C 扩展依赖均有 aarch64 预编译 wheel）
 - ✅ 适合：家庭 NAS、内网服务器、Tailscale/WireGuard 等私有组网
 - ⛔ 不要：将网关反代或 18710 端口直接暴露到公网（任何人可读写全部账目）
 - 依赖版本已锁定（见 `app/src/requirements.txt`）：升级依赖需先跑测试再提交
