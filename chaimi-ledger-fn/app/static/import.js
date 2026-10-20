@@ -175,6 +175,7 @@ async function impConfirm(){
 }
 async function loadBatches(){
   loadTpls();
+  loadRepair();
   const bs = await api(`/api/import/batches?ledger=${lid()}`);
   document.querySelector("#batchTable tbody").innerHTML = bs.map(b=>
     `<tr><td>${(b.imported_at||"").slice(0,16)}</td><td>${esc(b.filename)}</td><td>${esc(b.source)}</td><td>${b.count}</td>
@@ -185,4 +186,46 @@ async function undoBatch(id){
   if(!await uiConfirm("撤销将删除该批次全部流水，确定？", "撤销")) return;
   const r = await api(`/api/import/batches/${id}`, {method:"DELETE"});
   msg(`已撤销 ${r.deleted} 笔`); loadBatches(); afterTxWrite();
+}
+
+/* ===== 数据修复（原导入自愈的确认版） =====
+   旧版解析预览会静默把与词典冲突的历史分类改回去——手动整理的分类在下次预览时
+   被"还原"。现改为这里只读列出差异，点「应用修复」才写库。 */
+let repairInfo = null;
+async function loadRepair(){
+  const el = $("#imp_repair"), det = $("#imp_repair_detail");
+  if(!el) return;
+  try{ repairInfo = await api(`/api/repair/preview?ledger=${lid()}`); }
+  catch(_){ repairInfo = null; }
+  const n = repairInfo?.tx_fixes.length || 0, m = repairInfo?.mapping_resets.length || 0,
+        a = repairInfo?.account_merges.length || 0;
+  if(!n && !m && !a){ el.style.display="none"; det.style.display="none"; return; }
+  el.style.display="";
+  const bits = [];
+  if(a) bits.push(`<b>${a}</b> 组重复账户可合并`);
+  if(n) bits.push(`<b>${n}</b> 笔历史流水的分类与关键词词典不一致`);
+  if(m) bits.push(`<b>${m}</b> 条学习映射与内置默认冲突`);
+  el.innerHTML = `检测到 ${bits.join("、")}（不会再自动修改）` +
+    ` <a href="javascript:void(0)" onclick="repairDetail()" style="text-decoration:underline">查看</a>` +
+    `<button class="btn btn-ghost" style="margin-left:8px;padding:2px 10px;font-size:12px" onclick="repairApply()">应用修复</button>`;
+}
+function repairDetail(){
+  const det = $("#imp_repair_detail");
+  if(det.style.display !== "none" && det.innerHTML) { det.style.display="none"; return; }
+  const acc = (repairInfo?.account_merges || []).map(g =>
+    `<div>· 账户合并：${g.accounts.map(x=>esc(x.name)).join("、")} → <b>${esc(g.key)}</b></div>`).join("");
+  const tx = (repairInfo?.tx_fixes || []).slice(0, 100).map(f =>
+    `<div>· ${(f.date || "").slice(0,10)} ${esc(f.name)} ¥${(f.amount/100).toFixed(2)}：${esc(f.current)} → <b>${esc(f.target)}</b></div>`).join("");
+  const mp = (repairInfo?.mapping_resets || []).map(f =>
+    `<div>· 映射「${esc(f.source)}」（${esc(f.flow_type)}）：${esc(f.learned)} → 默认 ${esc(f.default)}</div>`).join("");
+  det.innerHTML = `<div class="sub" style="border-top:1px dashed var(--line,#ddd);margin-top:4px;padding-top:4px">${acc}${tx}${mp}</div>`;
+  det.style.display = "";
+}
+async function repairApply(){
+  if(!await uiConfirm("应用修复：合并归一同名的重复账户、按词典纠正冲突分类、重置冲突学习映射。你手动设定过的分类不会被修改。", "应用修复")) return;
+  try{
+    const r = await apiSend(`/api/repair/apply?ledger=${lid()}`, "POST", {});
+    msg(`已合并 ${r.accounts_merged} 个账户，纠正 ${r.tx_fixed} 笔分类，重置 ${r.mappings_reset} 条映射`);
+    loadRepair(); afterTxWrite(); loadAccs();
+  }catch(e){ msg(e.message, false); }
 }

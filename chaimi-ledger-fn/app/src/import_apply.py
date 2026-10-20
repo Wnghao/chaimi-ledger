@@ -63,15 +63,17 @@ def _insert_rows(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
             """INSERT INTO transactions(ledger_id, type, amount, batch_id, category_id,
                account_id, to_account_id, date, note, name, merchant, tags, receipt_path,
                source, ai_meta, order_no, refund_for, refund_status, refund_confidence,
-               need_confirm, row_hash)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               need_confirm, manual_cat, row_hash)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (ledger_id, p["type"], p["amount"], batch_id, p.get("category_id"),
              p.get("account_id"), p.get("to_account_id"), p["date"], p.get("note", ""),
              p.get("name", ""), p.get("merchant", ""), dbm._j(p.get("tags")), None,
              p.get("source"), dbm._j(p.get("ai_meta")),
              p.get("order_no", ""), rf, p.get("refund_status", "none"),
              p.get("refund_confidence"),  # NULL=非退款 / high / low / unmatched
-             1 if p.get("need_confirm") else 0, p["row_hash"]))
+             1 if p.get("need_confirm") else 0,
+             1 if p.get("user_changed") else 0,   # 预览里手动改过分类 → 修复不触碰
+             p["row_hash"]))
         inserted[pos] = cur.lastrowid
         if learn and p.get("user_changed") and p.get("map_source") and p.get("category_id"):
             dbm.upsert_mapping(conn, ledger_id, p["type"], p["map_source"],

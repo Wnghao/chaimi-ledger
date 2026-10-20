@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   refund_status TEXT DEFAULT 'none',
   refund_confidence TEXT,
   need_confirm INTEGER DEFAULT 0,
+  manual_cat INTEGER DEFAULT 0,   -- 用户手选过分类（编辑/待确认/预览纠正/机器人改）；数据修复永不触碰
   row_hash TEXT,
   created TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (ledger_id) REFERENCES ledgers(id));
@@ -230,6 +231,8 @@ def init_db() -> None:
                        "ALTER TABLE attribution_groups ADD COLUMN avatar TEXT NOT NULL DEFAULT 'f'")
         _ensure_column(conn, "ledgers", "budget",
                        "ALTER TABLE ledgers ADD COLUMN budget INTEGER DEFAULT 0")
+        _ensure_column(conn, "transactions", "manual_cat",
+                       "ALTER TABLE transactions ADD COLUMN manual_cat INTEGER DEFAULT 0")
         conn.execute("UPDATE attribution_groups SET avatar='f' WHERE avatar=''")
         if conn.execute("SELECT COUNT(*) FROM ledgers").fetchone()[0] == 0:
             seed()
@@ -552,20 +555,24 @@ def insert_tx(c: sqlite3.Connection, ledger_id: int, *, type: str, amount: int,
               name: str | None = None, merchant: str | None = None, note: str = "",
               tags: dict | None = None, receipt_path: str | None = None,
               source: str = "app", ai_meta: dict | None = None,
-              order_no: str | None = None, need_confirm: bool = False) -> int:
+              order_no: str | None = None, need_confirm: bool = False,
+              manual_cat: bool = False) -> int:
     """单笔流水插入（与原 server._insert_tx 同构）：row_hash 掺入当前时刻，
     手工/机器人来源永不撞导入去重索引。返回新行 id。
-    （微信机器人='bot'、导入=平台名，dup_hint 与流水标签可区分三方）。"""
+    （微信机器人='bot'、导入=平台名，dup_hint 与流水标签可区分三方）。
+    manual_cat：分类是否用户手选（App 记一笔带分类置位；bot/AI 自动路径不置），
+    置位的行不参与数据修复的词典纠正。"""
     date = norm_date(date)
     row_hash = hashlib.md5(
         f"manual|{date}|{amount}|{note}|{datetime.now().isoformat()}".encode()).hexdigest()
     cur = c.execute(
         """INSERT INTO transactions(ledger_id, type, amount, category_id, account_id, to_account_id,
-           date, name, merchant, note, tags, receipt_path, source, ai_meta, order_no, need_confirm, row_hash)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           date, name, merchant, note, tags, receipt_path, source, ai_meta, order_no, need_confirm,
+           manual_cat, row_hash)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (ledger_id, type, amount, category_id, account_id, to_account_id,
          date, name, merchant, note, _j(tags or {}), receipt_path, source, _j(ai_meta or {}),
-         order_no, 1 if need_confirm else 0, row_hash))
+         order_no, 1 if need_confirm else 0, 1 if manual_cat else 0, row_hash))
     return cur.lastrowid
 
 def patch_tx(c: sqlite3.Connection, tid: int, fields: dict) -> bool:
@@ -575,10 +582,12 @@ def patch_tx(c: sqlite3.Connection, tid: int, fields: dict) -> bool:
     if fields.get("amount") is not None:
         sets.append("amount=?")
         args.append(int(fields["amount"]))
-    for col in ("category_id", "account_id"):
-        if col in fields:
-            sets.append(f"{col}=?")
-            args.append(fields[col])
+    if "category_id" in fields:
+        sets += ["category_id=?", "manual_cat=1"]   # 用户改分类 → 数据修复不再触碰
+        args.append(fields["category_id"])
+    if "account_id" in fields:
+        sets.append("account_id=?")
+        args.append(fields["account_id"])
     if fields.get("date"):
         sets.append("date=?")
         args.append(norm_date(str(fields["date"])))

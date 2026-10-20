@@ -30,3 +30,19 @@ def _is_new_row(p: dict) -> bool:
     """预览行是否入库（server 计数 / 退款候选池 / apply 两处共用）：非精确重复且未被跳过
     （skip 含跨源/手动配对/无效行）。"""
     return not p.get("duplicate") and not p.get("skip")
+
+
+# 「中国」前缀归一白名单：官方名称带「中国」的银行（中国农业银行≡农业银行…）。
+# 「中国银行」剥后只剩「银行」不在名单，保持原样——它本身就是行名
+_BANK_AFTER_ZHONGGUO = ("农业银行", "建设银行", "工商银行", "交通银行", "邮政储蓄",
+                        "光大银行", "民生银行", "中信银行", "招商银行")
+
+def norm_account_name(name: str) -> str:
+    """账户名归一（自动导入的同一账户多写法合并判定共用）：
+    全角括号→半角、去空白、「中国」前缀按白名单归一、借记卡≡储蓄卡。
+    例：中国农业银行储蓄卡（3878） ≡ 农业银行储蓄卡(3878) ≡ 农业银行借记卡(3878)。"""
+    s = normalize(name).replace("（", "(").replace("）", ")")
+    s = s.replace(" ", "").replace("\u3000", "")
+    if s.startswith("中国") and any(s[2:].startswith(b) for b in _BANK_AFTER_ZHONGGUO):
+        s = s[2:]
+    return s.replace("借记卡", "储蓄卡")

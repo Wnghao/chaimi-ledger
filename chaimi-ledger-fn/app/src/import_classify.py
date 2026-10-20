@@ -1,11 +1,18 @@
-"""分类瀑布数据与工具：关键词词典（含例外/车牌/加油序）、映射查询、自愈（IMPORT_REFACTOR_PLAN §三）。"""
+"""分类瀑布数据与工具：关键词词典（含例外/车牌/加油序）、映射查询、自愈（IMPORT_REFACTOR_PLAN §三）。
+
+自愈（fix_candidates/_purge_bad_learned_mappings）自 1.0.1 起不再随导入解析自动执行——
+改为 /api/repair/preview 只读列出 + /api/repair/apply 用户确认后应用（真机事故：
+预览即改库把用户手动整理的分类静默翻回词典结果）。"""
 from __future__ import annotations
 
 import re
 import sqlite3
 
+import applog
 import db as dbm
-from import_common import _chunks
+from import_common import _chunks, norm_account_name
+
+_log = applog.get("import")
 
 # ---------- 分类解析（三段式 + transfer 子类；二级分类已取消） ----------
 
@@ -81,65 +88,163 @@ def _resolve_by_mapping(conn: sqlite3.Connection, ledger_id: int, flow_type: str
         (ledger_id, flow_type, source)).fetchone()
     return {"id": r["category_id"], "name": r["name"], "type": r["type"]} if r else None
 
+def mapping_reset_candidates(conn: sqlite3.Connection) -> list[dict]:
+    """将被 _purge_bad_learned_mappings 删除的「与默认冲突的学习映射」只读预览：
+    同源在 DEFAULT_MAPPINGS 有默认、但学习目标与默认不同 → 应用时删学习行、补种默认。
+    ②（学习行=默认 → learned=0）与 ③（补种缺失默认）是无感归一化，不列入。"""
+    out = []
+    for lid in [r["id"] for r in conn.execute("SELECT id FROM ledgers")]:
+        for flow, source, target in dbm.DEFAULT_MAPPINGS:
+            cid = dbm.top_cat_id(conn, lid, target, flow)
+            if not cid:
+                continue
+            row = conn.execute(
+                "SELECT m.category_id, c.name AS cat_name FROM category_mappings m "
+                "JOIN categories c ON m.category_id=c.id "
+                "WHERE m.ledger_id=? AND m.flow_type=? AND m.source=? AND m.learned=1",
+                (lid, flow, source)).fetchone()
+            if row and row["category_id"] != cid:
+                out.append({"ledger_id": lid, "flow_type": flow, "source": source,
+                            "learned": row["cat_name"], "default": target})
+    return out
+
 def _purge_bad_learned_mappings(conn: sqlite3.Connection) -> int:
-    """修复历史 AI 误判写入的脏学习映射（v6 单行模型）：
-    ① 与内置默认同源但分类不同的学习行 → 删除后按默认补种；
-    ② 与默认完全同源同分类的学习行 → 还原 learned=0（它就是默认）；
-    ③ 补种缺失的默认映射。"""
+    """修复历史 AI 误判写入的脏学习映射（v6 单行模型；仅 /api/repair/apply 确认后触发）：
+    ① 删与默认冲突的学习行——冲突口径同 mapping_reset_candidates（单一来源），
+       按 UNIQUE(ledger_id, flow_type, source) 三元组定位删除；
+    ② 学习行=默认 → 还原 learned=0（它就是默认）；③ 补种缺失默认（①删过的在此补回）。"""
     removed = 0
     with conn:
+        for m in mapping_reset_candidates(conn):
+            conn.execute("DELETE FROM category_mappings "
+                         "WHERE ledger_id=? AND flow_type=? AND source=?",
+                         (m["ledger_id"], m["flow_type"], m["source"]))
+            removed += 1
         for lid in [r["id"] for r in conn.execute("SELECT id FROM ledgers")]:
             for flow, source, target in dbm.DEFAULT_MAPPINGS:
                 cid = dbm.top_cat_id(conn, lid, target, flow)
                 if not cid:
                     continue
                 row = conn.execute(
-                    "SELECT id, category_id, learned FROM category_mappings "
-                    "WHERE ledger_id=? AND flow_type=? AND source=?", (lid, flow, source)).fetchone()
-                if row and row["learned"]:
-                    if row["category_id"] != cid:
-                        conn.execute("DELETE FROM category_mappings WHERE id=?", (row["id"],))
-                        removed += 1
-                        row = None
-                    else:
-                        conn.execute("UPDATE category_mappings SET learned=0 WHERE id=?", (row["id"],))
-                        continue
+                    "SELECT id, learned FROM category_mappings "
+                    "WHERE ledger_id=? AND flow_type=? AND source=?",
+                    (lid, flow, source)).fetchone()
                 if not row:
                     conn.execute(
                         "INSERT OR IGNORE INTO category_mappings(ledger_id, flow_type, source, category_id) "
                         "VALUES(?,?,?,?)", (lid, flow, source, cid))
+                elif row["learned"]:
+                    conn.execute("UPDATE category_mappings SET learned=0 WHERE id=?", (row["id"],))
+    if removed:
+        _log.info(f"数据修复：重置 {removed} 条与内置默认冲突的学习映射（用户确认触发）")
     return removed
 
-def auto_fix_transactions(conn: sqlite3.Connection, ledger_id: int) -> int:
-    """修复历史误分类流水：行文本（名称+商户+备注）命中关键词词典、
-    但当前一级分类与词典矛盾（如停车费被误分为餐饮美食）→ 纠正到词典分类。
-    仅按确定性关键词修，不碰转账/退款行。"""
+# 修复不触碰人情二分类（人情往来/红包礼金）——词典的人情切分是「金额+字样」的
+# 启发式（灰色地带，非确定性证据）：真机两轮反馈都是它把用户手动归类翻掉
+# （如 爸爸给人情/便利店小票 被建议改人情往来）。两侧都不参与：要改请手动改，
+# 手动改完即带 manual_cat 保护。
+_REPAIR_RENQING = ("人情往来", "红包礼金")
+
+def fix_candidates(conn: sqlite3.Connection, ledger_id: int) -> list[dict]:
+    """auto_fix_transactions 的只读预览（不写库）：行文本（名称+商户+备注）命中
+    关键词词典、且当前一级分类与词典矛盾（如停车费被误分为餐饮美食）→ 列为候选。
+    词典是类型盲的（如收入行名称也能命中「数码电器」），目标分类按**行类型**解析
+    id——该类型下不存在的分类不可修也不列出（否则应用时永远跳过、预览里赖着不走）。
+    manual_cat=1（用户手选过分类）的行永不列出——手动整理是用户意图，不 second-guess；
+    人情二分类两侧均不参与（见 _REPAIR_RENQING）。"""
+    cat_ids = {(c["name"], c["type"]): c["id"] for c in conn.execute(
+        "SELECT id, name, type FROM categories "
+        "WHERE ledger_id=? AND parent_id IS NULL", (ledger_id,))}
     rows = conn.execute(
-        "SELECT t.id, t.type, t.amount, t.name, t.merchant, t.note, p.name AS top_name "
+        "SELECT t.id, t.type, t.amount, t.date, t.name, t.merchant, t.note, "
+        "COALESCE(p.name, c.name) AS top_name "
         "FROM transactions t JOIN categories c ON t.category_id=c.id "
         "LEFT JOIN categories p ON c.parent_id=p.id "
-        "WHERE t.ledger_id=? AND t.type IN ('expense','income') AND t.refund_for IS NULL",
+        "WHERE t.ledger_id=? AND t.type IN ('expense','income') AND t.refund_for IS NULL "
+        "AND COALESCE(t.manual_cat,0)=0",
         (ledger_id,)).fetchall()
-    fixes = {}
+    out = []
     for r in rows:
+        if r["top_name"] in _REPAIR_RENQING:
+            continue
         kw = _top_by_keyword(f"{r['name'] or ''} {r['merchant'] or ''} {r['note'] or ''}", r["amount"])
-        if kw and kw != r["top_name"]:
-            fixes.setdefault((kw, r["type"]), []).append(r["id"])
+        cid = cat_ids.get((kw, r["type"])) if kw not in _REPAIR_RENQING else None
+        if cid and kw != r["top_name"]:
+            out.append({"id": r["id"], "type": r["type"], "amount": r["amount"],
+                        "date": r["date"], "name": (r["name"] or "")[:40],
+                        "current": r["top_name"], "target": kw, "target_id": cid})
+    return out
+
+def auto_fix_transactions(conn: sqlite3.Connection, ledger_id: int) -> int:
+    """修复历史误分类流水（仅 /api/repair/apply 用户确认后触发）：
+    候选集见 fix_candidates（目标 id 已按类型解析），按目标分组纠正。
+    仅按确定性关键词修，不碰转账/退款行/手动分类行。"""
+    by_target: dict = {}
+    for f in fix_candidates(conn, ledger_id):
+        by_target.setdefault(f["target_id"], []).append(f["id"])
     n = 0
     with conn:
-        for (top_name, ftype), ids in fixes.items():
-            cat = conn.execute(
-                "SELECT id FROM categories "
-                "WHERE ledger_id=? AND parent_id IS NULL AND name=? AND type=?",
-                (ledger_id, top_name, ftype)).fetchone()
-            if not cat:
-                continue
+        for cid, ids in by_target.items():
             for part in _chunks(ids):
                 q = ",".join("?" * len(part))
                 cur = conn.execute(
-                    f"UPDATE transactions SET category_id=? WHERE id IN ({q})", (cat["id"], *part))
+                    f"UPDATE transactions SET category_id=? WHERE id IN ({q})", (cid, *part))
                 n += cur.rowcount
+    if n:
+        _log.info(f"数据修复：{n} 笔历史流水按关键词词典纠正分类（用户确认触发）")
     return n
+
+def account_merge_groups(conn: sqlite3.Connection, ledger_id: int) -> list[dict]:
+    """同账本内归一后同名的账户组（自动导入的历史变体，只读预览）：
+    [{key: 归一名, accounts: [{id, name, tx_count}]}]，键排序保证预览顺序稳定。"""
+    groups: dict = {}
+    for r in conn.execute(
+            "SELECT a.id, a.name, (SELECT COUNT(*) FROM transactions t "
+            "WHERE t.account_id=a.id) AS n FROM accounts a "
+            "WHERE a.ledger_id=? ORDER BY a.id", (ledger_id,)):
+        groups.setdefault(norm_account_name(r["name"]), []).append(
+            {"id": r["id"], "name": r["name"], "tx_count": r["n"]})
+    return [{"key": k, "accounts": v} for k, v in sorted(groups.items()) if len(v) > 1]
+
+def merge_duplicate_accounts(conn: sqlite3.Connection, ledger_id: int) -> int:
+    """合并归一同名的重复账户（/api/repair/apply 用户确认后触发）：
+    幸存者优先取名字已是归一形的成员，否则取流水最多的（并列取小 id）；
+    幸存者改名为归一形，其余成员的 account_id/to_account_id 改指幸存者后删除。
+    返回合并掉（删除）的账户数。"""
+    merged = 0
+    with conn:
+        for g in account_merge_groups(conn, ledger_id):
+            key, members = g["key"], g["accounts"]
+            survivor = next((m for m in members if m["name"] == key), None) \
+                or max(members, key=lambda m: (m["tx_count"], -m["id"]))
+            sid = survivor["id"]
+            others = [m["id"] for m in members if m["id"] != sid]
+            if not others:
+                continue
+            if survivor["name"] != key:
+                conn.execute("UPDATE accounts SET name=? WHERE id=?", (key, sid))
+            for oid in others:
+                conn.execute("UPDATE transactions SET account_id=? WHERE account_id=?", (sid, oid))
+                conn.execute("UPDATE transactions SET to_account_id=? WHERE to_account_id=?", (sid, oid))
+                conn.execute("DELETE FROM accounts WHERE id=?", (oid,))
+            merged += len(others)
+            names = "、".join(f"「{m['name']}」" for m in members)
+            _log.info(f"账户合并（用户确认触发）：{names} → 「{key}」")
+    return merged
+
+def repair_preview(conn: sqlite3.Connection, ledger_id: int) -> dict:
+    """数据修复只读预览：词典分类冲突流水 + 将被重置的学习映射 + 可合并的重复账户。"""
+    return {"tx_fixes": fix_candidates(conn, ledger_id),
+            "mapping_resets": mapping_reset_candidates(conn),
+            "account_merges": account_merge_groups(conn, ledger_id)}
+
+def repair_apply(conn: sqlite3.Connection, ledger_id: int) -> dict:
+    """数据修复应用（/api/repair/apply，用户确认后触发）：合并重复账户 → 清脏映射 →
+    纠正流水分类。注意映射清理是全局口径（与 _purge_bad_learned_mappings 一致）。"""
+    n_acc = merge_duplicate_accounts(conn, ledger_id)
+    n_map = _purge_bad_learned_mappings(conn)
+    n_tx = auto_fix_transactions(conn, ledger_id)
+    return {"tx_fixed": n_tx, "mappings_reset": n_map, "accounts_merged": n_acc}
 
 
 # ---------- 分类瀑布（IMPORT_REFACTOR_PLAN §三；自 build_previews 显式化，行为逐字段等价） ----------
@@ -153,8 +258,9 @@ class ClassifyCtx:
             "SELECT c.id, c.name, c.type, c.parent_id, p.name AS pname FROM categories c "
             "LEFT JOIN categories p ON c.parent_id=p.id WHERE c.ledger_id=?", (ledger_id,)))
         self.cat_top = {(c["name"], c["type"]): c for c in cats if not c["pname"]}
-        self.tcat = {"退款": dbm.top_cat_id(conn, ledger_id, "退款", "transfer"),
-                     "不计收支": dbm.top_cat_id(conn, ledger_id, "不计收支", "transfer")}
+        # transfer 专用分类直接取自已加载的一级索引，不再各查一次库
+        self.tcat = {n: (self.cat_top.get((n, "transfer")) or {"id": None})["id"]
+                     for n in ("退款", "不计收支")}
 
     def top(self, name: str, ftype: str):
         """按 (名字, 类型) 精确查一级分类——同名收支分类（人情往来）互不覆盖。"""

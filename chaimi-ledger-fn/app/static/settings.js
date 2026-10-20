@@ -318,7 +318,10 @@ async function addAccount(){
   await apiSend(`/api/accounts?ledger=${lid()}`,"POST",{name:$("#ac_name").value});
   $("#ac_name").value="";msg("账户已添加 ✅");stAccs();loadAccs();
 }
-async function delAcc(id){await api(`/api/accounts/${id}`,{method:"DELETE"});stAccs();loadAccs();}
+async function delAcc(id){
+  if(!await uiConfirm("删除该账户？其历史流水将变为「未指定账户」——分类和统计不变，也不会重新进入待确认。", "删除")) return;
+  await api(`/api/accounts/${id}`,{method:"DELETE"});stAccs();loadAccs();
+}
 async function loadBks(){
   const bs=await api("/api/backups");
   document.querySelector("#bkTable tbody").innerHTML=bs.map(b=>

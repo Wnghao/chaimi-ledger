@@ -38,6 +38,7 @@ import bot_ilink
 import config
 import db as dbm
 import import_bill as ib
+import import_classify as ic
 
 applog.setup()   # 进程内首个初始化点：后续 get() 的子 logger 统一走双 handler
 log = applog.get("server")
@@ -279,8 +280,9 @@ def update_ledger(lid: int, body: LedgerIn):
 @app.delete("/api/ledgers/{lid}")
 def delete_ledger(lid: int):
     with conn() as c:
-        for t in ("transactions", "category_mappings", "categories", "accounts",
-                  "attributions", "attribution_groups"):
+        # import_batches 一并清（审计发现的历史残余：漏清会留孤儿批次行）
+        for t in ("transactions", "import_batches", "category_mappings", "categories",
+                  "accounts", "attributions", "attribution_groups"):
             c.execute(f"DELETE FROM {t} WHERE ledger_id=?", (lid,))
         c.execute("DELETE FROM ledgers WHERE id=?", (lid,))
     return {"ok": True}
@@ -317,12 +319,18 @@ def update_category(cid: int, body: CategoryIn):
 
 @app.delete("/api/categories/{cid}")
 def delete_category(cid: int):
+    """删分类必须回炉关联流水（无分类的行因 INNER JOIN 不进任何列表，只能从
+    待确认队列重新归类）——但留审计日志，静默大面积改数据必须可追溯。"""
     with conn() as c:
-        c.execute("UPDATE transactions SET category_id=NULL, need_confirm=1 WHERE category_id=?", (cid,))
+        n = c.execute("UPDATE transactions SET category_id=NULL, need_confirm=1 WHERE category_id=?",
+                      (cid,)).rowcount
         c.execute("DELETE FROM category_mappings WHERE category_id=?", (cid,))
         c.execute("DELETE FROM categories WHERE parent_id=?", (cid,))
         c.execute("DELETE FROM categories WHERE id=?", (cid,))
-    return {"ok": True}
+    if n:
+        log.info(f"删除分类 #{cid}：{n} 笔流水置空分类并进入待确认（重新归类入口）")
+    _bump_rev()
+    return {"ok": True, "affected": n}
 
 # 存储不动（tags.attribution 仍存原始名），两条归组路径：
 #   ① 名单路径：归属名查 attributions.group_id（导入的 liulu·支付宝 → 组「老公」，导入自动映射）
@@ -490,10 +498,20 @@ def update_account(aid: int, body: AccountIn):
 
 @app.delete("/api/accounts/{aid}")
 def delete_account(aid: int):
-    with conn() as c:
-        c.execute("UPDATE transactions SET account_id=NULL, need_confirm=1 WHERE account_id=?", (aid,))
+    """1.0.1 起不再把关联流水打回待确认——旧版 `need_confirm=1` 会把该账户全部
+    历史流水瞬间塞满待确认队列（真机事故：删一个旧账户，次日发现待确认爆满）。
+    账户置空即可：分类/统计不受影响，流水照常显示为「未指定账户」。"""
+    c = conn()
+    row = c.execute("SELECT name FROM accounts WHERE id=?", (aid,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    with c:
+        n = c.execute("UPDATE transactions SET account_id=NULL WHERE account_id=?",
+                      (aid,)).rowcount
         c.execute("DELETE FROM accounts WHERE id=?", (aid,))
-    return {"ok": True}
+    log.info(f"删除账户 #{aid}「{row['name']}」：{n} 笔流水账户置空（分类与确认状态不动）")
+    _bump_rev()
+    return {"ok": True, "affected": n}
 
 # ---------- 流水 ----------
 
@@ -631,7 +649,8 @@ def _insert_tx(c, ledger: int, t: TxIn):
         account_id=t.account_id, to_account_id=t.to_account_id, date=t.date,
         name=t.name, merchant=t.merchant, note=t.note, tags=t.tags,
         receipt_path=t.receipt_path or None, source=t.source, ai_meta=t.ai_meta,
-        order_no=t.order_no, need_confirm=t.need_confirm)
+        order_no=t.order_no, need_confirm=t.need_confirm,
+        manual_cat=bool(t.category_id))   # App 记一笔带分类=用户手选
 
 @app.post("/api/transactions")
 def create_transaction(ledger: int, body: TxIn):
@@ -651,7 +670,8 @@ def update_transaction(tid: int, body: TxIn):
         # name/merchant/order_no 允许单独更新：传 null 保持原值（COALESCE），不传不会被清空
         # receipt_path：None=保持原值；""=清空(NULL)；非空=覆盖。SQLite 无「参数是否为 NULL」的
         # 内省，原 COALESCE(NULLIF(?, ''), receipt_path) 会把 "" 与 None 同视（都保留原值），
-        old = c.execute("SELECT receipt_path, date FROM transactions WHERE id=?", (tid,)).fetchone()
+        old = c.execute("SELECT receipt_path, date, category_id FROM transactions WHERE id=?",
+                        (tid,)).fetchone()
         if not old:
             raise HTTPException(404, "流水不存在")
         old_path = old["receipt_path"]
@@ -661,11 +681,14 @@ def update_transaction(tid: int, body: TxIn):
                order_no=COALESCE(?, order_no),
                note=?, tags=?,
                receipt_path=CASE WHEN ? IS NULL THEN receipt_path ELSE NULLIF(?, '') END,
-               need_confirm=? WHERE id=?""",
+               need_confirm=?,
+               manual_cat=CASE WHEN ? IS NOT ? THEN 1 ELSE manual_cat END
+               WHERE id=?""",
             (body.type, body.amount, body.category_id, body.account_id, body.to_account_id,
              dbm.norm_date(body.date, old=old["date"]), body.name, body.merchant, body.order_no,
              body.note, dbm._j(body.tags), body.receipt_path, body.receipt_path,
-             1 if body.need_confirm else 0, tid))
+             1 if body.need_confirm else 0,
+             body.category_id, old["category_id"], tid))
         # （income 自动转 transfer：不再计入收入，统计在原消费日扣减，见 DESIGN 8.5.1）
         if body.refund_for is not None:
             _link_refund(c, tid, body.refund_for, body.amount, confidence=None)
@@ -784,7 +807,8 @@ def resolve_pending(tid: int, body: ResolveIn):
         raise HTTPException(404)
     with c:
         if body.category_id is not None:
-            c.execute("UPDATE transactions SET category_id=?, need_confirm=0 WHERE id=?",
+            # 待确认里选分类=用户手选 → 打 manual_cat 标，数据修复不再翻动
+            c.execute("UPDATE transactions SET category_id=?, need_confirm=0, manual_cat=1 WHERE id=?",
                       (body.category_id, tid))
             # 仅当分类真的被用户改过才回写学习映射；原样确认不是用户意图，不学习。
             # 学习键用导入时存进 ai_meta 的原始来源分类名（v6 前用 note，导入行常为空导致学不到）
@@ -989,6 +1013,23 @@ def undo_import(batch_id: int):
     n = ib.undo_batch(conn(), batch_id)
     _bump_rev()
     return {"deleted": n}
+
+# ---------- 数据修复（原导入自愈的确认版） ----------
+# 旧版 /api/import/parse 在预览阶段静默执行 _purge_bad_learned_mappings +
+# auto_fix_transactions 直接改写已有数据——用户手动整理的分类会在下一次预览
+# （哪怕最终取消导入）被翻回词典结果。现改为只读预览 + 显式应用（1.0.1）。
+
+@app.get("/api/repair/preview")
+def repair_preview(ledger: int):
+    _ledger_or_404(ledger)
+    return ic.repair_preview(conn(), ledger)
+
+@app.post("/api/repair/apply")
+def repair_apply(ledger: int):
+    _ledger_or_404(ledger)
+    r = ic.repair_apply(conn(), ledger)
+    _bump_rev()
+    return r
 
 # ---------- 通用模板向导（P1）：嗅探 + 模板 CRUD ----------
 

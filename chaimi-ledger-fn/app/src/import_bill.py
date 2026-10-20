@@ -22,10 +22,11 @@ from datetime import datetime
 
 import db as dbm
 import platform_templates as pt
-from import_common import _is_new_row, _is_placeholder_name, is_meaningless_name, normalize
-from import_classify import (_top_by_keyword,
-                             _purge_bad_learned_mappings, auto_fix_transactions,
-                             ClassifyCtx, classify_transfer, classify_flow)
+from import_common import (_is_new_row, _is_placeholder_name, is_meaningless_name,
+                           norm_account_name, normalize)
+from import_classify import _top_by_keyword   # 门面再导出：ai/tests 经 ib._top_by_keyword
+                                               # 访问（误删即断链，教训见 02bc9a9）
+from import_classify import ClassifyCtx, classify_transfer, classify_flow
 from import_match import _LedgerSnapshot, _match_refunds, _link_payment
 from import_apply import apply_import, undo_batch, _rescan_unmatched_refunds
 
@@ -511,24 +512,36 @@ _WALLET_KEYWORDS = {
 }
 _PLATFORM_ACC = {"alipay": "支付宝", "wechat": "微信支付", "jd": "京东", "meituan": "美团支付"}
 
+def _find_norm_account(conn: sqlite3.Connection, ledger_id: int, name: str) -> int | None:
+    """归一同名查账户（同一张卡的历史变体写法兜底）：命中返回 id，未命中 None。"""
+    key = norm_account_name(name)
+    for r in conn.execute("SELECT id, name FROM accounts WHERE ledger_id=?", (ledger_id,)):
+        if norm_account_name(r["name"]) == key:
+            return r["id"]
+    return None
+
 def _ensure_account(conn: sqlite3.Connection, ledger_id: int, name: str, atype: str = "bank") -> int:
-    """账户不存在则自动创建（导入解析期即时生效，独立提交；撤销导入不删，后续自动复用）。"""
+    """取或建账户：精确名 → 归一同名（同一张卡在微信/支付宝账单里的不同写法不再
+    各建一份）→ 按归一名建户。建户在导入解析期即时生效、独立提交；撤销导入不删。"""
     row = conn.execute("SELECT id FROM accounts WHERE ledger_id=? AND name=?",
                        (ledger_id, name)).fetchone()
     if row:
         return row["id"]
+    aid = _find_norm_account(conn, ledger_id, name)
+    if aid:
+        return aid
     with conn:
         sort = conn.execute("SELECT COALESCE(MAX(sort),0)+1 FROM accounts WHERE ledger_id=?",
                             (ledger_id,)).fetchone()[0]
         cur = conn.execute("INSERT INTO accounts(ledger_id, name, type, sort) VALUES(?,?,?,?)",
-                           (ledger_id, name, atype, sort))
+                           (ledger_id, norm_account_name(name), atype, sort))
     return cur.lastrowid
 
 def _match_account(conn: sqlite3.Connection, ledger_id: int, platform: str, pay: str) -> int | None:
     """收/付款方式 → 账户 id（未匹配返回 None）：
     ① 银行卡段优先（& 组合取左起第一个银行卡段），按原文自动建户（如 招商银行储蓄卡(7529)）；
     ② 平台钱包/空值/" 归平台账户（花呗→支付宝、零钱通→微信支付），平台账户缺失自动补建（京东）；
-    ③ 其余（本应用导出等）按现有账户名子串匹配。"""
+    ③ 其余（本应用导出等）按现有账户名子串或归一同名匹配。"""
     parts = [p.strip() for p in (pay or "").split("&") if p.strip() and p.strip() != "/"]
     bank = next((p for p in parts if _BANK_RE.search(p)), None)
     if bank:
@@ -537,11 +550,13 @@ def _match_account(conn: sqlite3.Connection, ledger_id: int, platform: str, pay:
             not parts or any(any(k in p for k in _WALLET_KEYWORDS[platform]) for p in parts)):
         return _ensure_account(conn, ledger_id, _PLATFORM_ACC[platform], "e-wallet")
     accs = {r["name"]: r["id"] for r in conn.execute(
-        "SELECT id, name FROM accounts WHERE ledger_id=?", (ledger_id,))}
-    for p in parts[:1]:
+        "SELECT name, id FROM accounts WHERE ledger_id=?", (ledger_id,))}
+    if parts:
+        p = parts[0]
         for name, aid in accs.items():
             if name in p or p in name:
                 return aid
+        return _find_norm_account(conn, ledger_id, p)   # 归一同名兜底历史旧写法账户
     return None
 
 def _account_name(conn: sqlite3.Connection, acc_id: int | None) -> str:
@@ -552,12 +567,10 @@ def _account_name(conn: sqlite3.Connection, acc_id: int | None) -> str:
     return r["name"] if r else ""
 
 def build_previews(conn: sqlite3.Connection, ledger_id: int, flows: list[RawFlow]) -> list[dict]:
-    """RawFlow → FlowPreview（含分类解析/去重/退款匹配预填，7.5/7.8）。"""
-    # 自愈（清洗脏映射/纠错历史分类）只在有新数据时跑——全重复行的重导不需要
-    has_new = any("hash_fields" in f and "skip" not in f for f in flows)
-    if has_new:
-        _purge_bad_learned_mappings(conn)
-        auto_fix_transactions(conn, ledger_id)
+    """RawFlow → FlowPreview（含分类解析/去重/退款匹配预填，7.5/7.8）。
+    1.0.1 起**纯只读**：旧版在这里随解析静默执行 _purge_bad_learned_mappings +
+    auto_fix_transactions 改写已有数据——用户手动整理的分类会在下一次（哪怕只是
+    预览、未确认导入）被翻回词典结果。自愈移至 /api/repair/*（预览+确认应用）。"""
     # 账本快照：去重/退款匹配/跨源配对/疑似重复提示共用（一次加载，见 _LedgerSnapshot）
     snap = _LedgerSnapshot(conn, ledger_id)
     existing = snap.by_hash
@@ -595,12 +608,9 @@ def build_previews(conn: sqlite3.Connection, ledger_id: int, flows: list[RawFlow
         p["account_name"] = _account_name(conn, acc_id) if acc_id else ""
 
         if f["type"] == "transfer":
-            # 导出回环：收款账户列按名解析（先精确后建户），转账对方不丢
+            # 导出回环：收款账户列按名取户（精确 → 归一同名 → 建户），转账对方不丢
             if f.get("to_account_name"):
-                row = conn.execute("SELECT id FROM accounts WHERE ledger_id=? AND name=?",
-                                   (ledger_id, f["to_account_name"])).fetchone()
-                p["to_account_id"] = row["id"] if row else _ensure_account(
-                    conn, ledger_id, f["to_account_name"], "bank")
+                p["to_account_id"] = _ensure_account(conn, ledger_id, f["to_account_name"], "bank")
             classify_transfer(f, ctx, p,
                               None if f.get("export_refund_idx") is None
                               else flows[-f["export_refund_idx"] - 1]["amount"])

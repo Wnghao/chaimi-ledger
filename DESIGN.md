@@ -25,7 +25,7 @@
 | db.py | SQLite schema、迁移、公共查询、默认映射种子（DEFAULT_MAPPINGS） |
 | import_bill.py | 导入门面：统一路由 + 模板引擎与原语（对外入口 `parse_bill/build_previews`） |
 | platform_templates.py | 内置平台模板声明数据（支付宝/微信/京东/导出/美团，随应用发版） |
-| import_classify.py | 分类瀑布：词典/映射/同名/兜底 + 人情二切与复核 + 自愈清理 |
+| import_classify.py | 分类瀑布：词典/映射/同名/兜底 + 人情二切与复核 + 自愈（1.0.1 起确认制：/api/repair 预览+应用，不随解析自动改库） |
 | import_match.py | 账本快照、退款匹配链、跨源/手动配对 |
 | import_apply.py | 入库四阶段（增强/批次/插入+learn+批内回填/rescan）与整批撤销 |
 | import_common.py | 导入链路叶子工具（normalize/去重谓词/占位名判定） |
