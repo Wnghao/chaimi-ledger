@@ -37,6 +37,8 @@
   `_bot_guard` 同口径：gateway 模式 + 已配置 Token + 常量时间校验，任一不满足不放行；
   `/api/bot/status`、`/api/bot/test` 无自带鉴权，仍走 Basic 门
 - 文档同步：README 更正"保存即生效（无需重启）"（中间件每请求现读配置）并补网关/微信通道说明
+- `web_auth` 键预置进配置模板 chaimi.conf（enabled:false）——设备端每次保存设置也会随
+  默认值整包写盘，后期启用只改 enabled 并补密码，无需查文档抄键名
 
 ## 1.0.1（2026-10-20）数据安全修复
 
