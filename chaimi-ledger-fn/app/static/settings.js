@@ -204,9 +204,11 @@ function mkEditToggle(btnId, rerender){
   return st;
 }
 const accEdit = mkEditToggle("accEditBtn", () => stAccs());
+let accRows = [];   // stAccs 最近一次拉取的账户行（delAcc 弹确认框取名字/笔数用）
 async function stAccs(){
   const r = accScopeInfo();
   const as = await api(`/api/accounts?ledger=${lid()}` + (r.from ? `&from=${r.from}&to=${r.to}` : ""));
+  accRows = as;
   // 消费金额 = 所选范围净支出（支出 − 退款回账；收入/转账不计）
   document.querySelector("#accTable tbody").innerHTML = as.map(a =>
     `<tr><td>${esc(a.name)}</td><td class="num c-exp">${curSym()}${fmt(a.spend || 0)}</td>
@@ -319,7 +321,13 @@ async function addAccount(){
   $("#ac_name").value="";msg("账户已添加 ✅");stAccs();loadAccs();
 }
 async function delAcc(id){
-  if(!await uiConfirm("删除该账户？其历史流水将变为「未指定账户」——分类和统计不变，也不会重新进入待确认。", "删除")) return;
+  const a = accRows.find(x => x.id === id) || {};
+  const name = a.name || "该账户";   // 极端情况（列表未拉到）兜底
+  const n = a.tx_count || 0;
+  const tip = n > 0
+    ? `删除账户「${name}」？其 ${n} 笔历史流水将变为「未指定账户」——分类和统计不变，也不会重新进入待确认。注意：之后重建同名账户不会自动关联回这些流水。`
+    : `删除账户「${name}」？该账户下没有关联流水。`;
+  if(!await uiConfirm(tip, "删除")) return;
   await api(`/api/accounts/${id}`,{method:"DELETE"});stAccs();loadAccs();
 }
 async function loadBks(){

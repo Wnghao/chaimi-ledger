@@ -49,13 +49,13 @@
 
 **可选：开启 Web 层 Basic Auth**（v1.0.1+，需要比内网边界多一层门时）
 
-编辑配置文件 `chaimi.conf`（飞牛在 `@PKGETC/var/`，本地开发在 `app/src/`）：
+编辑配置文件 `chaimi.conf`（飞牛在 `/usr/local/apps/@appconf/chaimi-ledger/`，本地开发在 `app/src/`）：
 
 ```json
 "web_auth": { "enabled": true, "username": "你的用户名", "password": "你的密码" }
 ```
 
-保存后重启应用。启用后浏览器首次访问弹原生登录框，输一次即记住；`/healthz` 探活不受影响。**用户名或密码留空时恒拒绝**（fail-closed），配置好后才会放行。
+保存即生效（每请求现读配置，无需重启）。启用后浏览器首次访问弹原生登录框，输一次即记住；`/healthz` 探活不受影响。**用户名或密码留空时恒拒绝**（fail-closed），配置好后才会放行。网关机器人（`/api/bot/message`、`/api/bot/receipt`）凭自带的 Bearer Token 等价放行，无需叠加 Basic 凭证；微信直连为出站轮询，不受影响。
 
 ### 飞牛 NAS（推荐）
 

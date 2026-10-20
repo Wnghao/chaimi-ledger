@@ -82,6 +82,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="柴米记账", lifespan=lifespan)
 
 _AUTH_EXEMPT = ("/healthz",)   # NAS 探活放行；其余（含静态资源，浏览器记凭证后自动携带）一律过门
+# 自带 Bearer Token 鉴权的网关端点：web_auth 门凭 Token 等价放行（status/test 无自带鉴权，仍过 Basic 门）
+_BOT_TOKEN_PATHS = ("/api/bot/message", "/api/bot/receipt")
 
 def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
     """Basic Auth 常量时间校验（评估 R-04 中期项，默认关闭，见 README 部署前提）。"""
@@ -102,10 +104,14 @@ def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
 async def web_auth_guard(request: Request, call_next):
     """可选 Web 鉴权门（评估 R-04）：chaimi.conf 的 web_auth.enabled=true 时启用。
     定义于 strip_gateway_prefix 之前 → 作为内层中间件拿到剥完网关前缀的路径。
-    凭证为空视为未配置：拒绝并挑战，强制管理员补齐配置（fail-closed）。"""
+    凭证为空视为未配置：拒绝并挑战，强制管理员补齐配置（fail-closed）。
+    网关端点（_BOT_TOKEN_PATHS）凭自带 Bearer Token 等价放行：Token 即该链路的门
+    （到达端点后 _bot_guard 同口径再验），Basic Auth 只管浏览器。"""
     cfg = config.load().get("web_auth") or {}
     if cfg.get("enabled") and request.url.path not in _AUTH_EXEMPT:
-        if not _basic_auth_ok(request.headers.get("authorization") or "", cfg):
+        auth = request.headers.get("authorization") or ""
+        if not _basic_auth_ok(auth, cfg) and not (
+                request.url.path in _BOT_TOKEN_PATHS and _bot_token_ok(auth)):
             return Response(content=b'{"detail":"unauthorized"}', status_code=401,
                             headers={"WWW-Authenticate": 'Basic realm="chaimi-ledger"'},
                             media_type="application/json")
@@ -469,8 +475,14 @@ def list_accounts(ledger: int, frm: str = Query("", alias="from"), to: str = "")
             gross[a] = gross.get(a, 0) + amt
         else:                      # 退款转账：钱退回 account_id
             refund[a] = refund.get(a, 0) + amt
+    # 全量流水笔数（不受日期范围影响）：删账户确认框提示"将置空 N 笔"用，
+    # 口径与 delete_account 的 UPDATE ... WHERE account_id=? 一致（不分类型）
+    cnt = {r[0]: r[1] for r in conn().execute(
+        "SELECT account_id, COUNT(*) FROM transactions "
+        "WHERE ledger_id=? AND account_id IS NOT NULL GROUP BY account_id", (ledger,))}
     for r in rows:
         r["spend"] = gross.get(r["id"], 0) - refund.get(r["id"], 0)
+        r["tx_count"] = cnt.get(r["id"], 0)
     # 含未选账户的支出、退款按原消费日归因；与按账户拆分的 spend 列因口径差异可能不相等
     if frm or to:
         s = dbm.stats_summary_range(conn(), ledger, frm, to or "9999-12-31")
@@ -1588,6 +1600,13 @@ def _ct_eq(a: str, b: str) -> bool:
 def _token_ok(authorization: str, token: str) -> bool:
     """常量时间 Bearer 校验（评估 R-08）：逐字节比较不随匹配长度泄漏时序。"""
     return authorization.startswith("Bearer ") and _ct_eq(authorization, f"Bearer {token}")
+
+def _bot_token_ok(authorization: str) -> bool:
+    """网关 Bearer Token 是否有效（_bot_guard 的布尔版，供 web_auth 门放行判定，同口径）：
+    gateway 模式 + 已配置 api_token + 常量时间校验。任一不满足都不放行。"""
+    cfg = _bot_cfg()
+    token = cfg.get("api_token") or ""
+    return cfg.get("mode") == "gateway" and bool(token) and _token_ok(authorization, token)
 
 def _bot_guard(authorization: str) -> None:
     """B 通道双门：mode=gateway 才放行 + Bearer Token 校验（设置页生成/重置）。"""
