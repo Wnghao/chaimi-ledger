@@ -5,8 +5,8 @@ __pycache__/
 # 运行时数据（SQLite 库、小票等，绝不入库）
 chaimi-ledger-fn/app/data/
 
-# 构建产物
-*.fpk
+# 构建产物（仓库根目录的 fnpack 输出）；dist/ 为分发目录，随 tag 入库挂 Releases
+/*.fpk
 
 # 飞牛专有打包工具（不随仓库分发，见 README）
 fnpack.exe
@@ -19,6 +19,9 @@ Thumbs.db
 
 # 构建脚本（本地专用，不入库）
 build.bat
+
+# 会话临时文件（凭据/脚本，绝不入库）
+zcode-tmp-*
 
 # 测试（本地质量门禁，不入库；build.bat 打包前仍在本地跑）
 tests/
