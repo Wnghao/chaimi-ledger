@@ -245,18 +245,20 @@ function renderDetail(items){
 }
 async function fillDayDetail(fetcher, keep=false){   // 明细弹窗统一取数渲染（日/区间/分类/人情四个入口共用）
   // keep=数据刷新（长轮询推送/回前台触发 dayRefresh）：旧内容保持到新数据到手，不再闪「加载中…」；
-  // 滚动位置还原，选择态存活（已删笔从选择集清洗），重渲染后由 txSelDecorate 重插勾选框
+  // 滚动位置还原，选择态存活（已删笔从选择集清洗），重渲染后由 txSelDecorate 重插勾选框。
+  // 首开(keep=false)时 showDetail 已退出选择态，sel 恒 false，同一逻辑自然无感。
   const body = document.querySelector("#dayMask .modal-body");
   const sc = keep ? body.scrollTop : 0;
+  const sel = daySelOn();
   try{
     const r = await fetcher();
-    if(keep && daySelOn()){
+    if(sel){
       const live = new Set(r.items.map(x=>x.id));
       for(const id of [...txSelSet]) if(!live.has(id)) txSelSet.delete(id);
     }
     $("#dayList").innerHTML = renderDetail(r.items);
     if(keep) body.scrollTop = sc;
-    if(daySelOn()) txSelDecorate();
+    if(sel) txSelDecorate();
   }catch(e){
     if(keep){ msg(`明细刷新失败：${e.message}`, false); }   // 刷新失败保留旧内容
     else $("#dayList").innerHTML = `<div class="sub">加载失败：${esc(e.message)}</div>`;

@@ -1642,13 +1642,11 @@ def bot_test(body: BotMsgIn):
 @app.get("/api/rev/wait")
 def rev_wait(since: int = -1, hold: int = 25):
     """长轮询(方案B,替代被飞牛网关掐杀的 SSE 无限流):挂住直到 rev 偏离 since
-    或 hold 秒超时再返回;不带 since 立即返回当前值(首轮立基线)。每个请求时长有限
-    (<60s 网关掐杀线),缓冲网关下照常送达——与 AI 聊天流可用同理。前端循环调用,
-    变更后 1s 内刷新。"""
-    deadline = time.time() + max(1, min(hold, 30))
+    或 hold 秒超时再返回;不带 since 立即返回当前值(首轮立基线/回前台轻量探测共用)。
+    每个请求时长有限(<60s 网关掐杀线,hold 收敛 1..30s),缓冲网关下照常送达——
+    与 AI 聊天流可用同理。前端循环调用,变更后 1s 内刷新。"""
     with _REV_COND:
-        _REV_COND.wait_for(lambda: _REV["n"] != since,
-                           timeout=max(0.1, deadline - time.time()))
+        _REV_COND.wait_for(lambda: _REV["n"] != since, timeout=max(1, min(hold, 30)))
         return {"rev": _REV["n"]}
 
 @app.post("/api/bot/token")

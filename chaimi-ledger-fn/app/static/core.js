@@ -588,28 +588,26 @@ function editRcpClear(){
    (网络抖)保守刷一次,兜底性与旧版持平。探测独立于长轮询环,环卡死也能发现变更。 */
 (function(){
   let _rev = null, _t = null, _ctrl = null;
+  const cv = "cv=" + (window.CHAIMI_VER || "");
   const bump = ()=>{ clearTimeout(_t); _t = setTimeout(()=>{ if(typeof afterTxWrite === "function") afterTxWrite(); }, 800); };
-  (function loop(){
+  // rev 基线统一收口：首轮只立基线不刷,此后偏离才刷（loop 与 probe 共用）
+  const seen = rv => { rv = String(rv); if(_rev !== null && rv !== _rev) bump(); _rev = rv; };
+  const loop = async ()=>{
     _ctrl = new AbortController();
     const to = setTimeout(()=>_ctrl.abort(), 35000);   // 半开连接兜底:超 hold+10s 强制重开
-    const q = (_rev === null ? "?" : "?since=" + _rev + "&") + "cv=" + (window.CHAIMI_VER || "");
-    fetch("api/rev/wait" + q, {signal: _ctrl.signal})
-      .then(r=>r.json())
-      .then(j=>{
-        clearTimeout(to);
-        const rv = String(j.rev);
-        if(_rev !== null && rv !== _rev){ _rev = rv; bump(); }   // 首轮只立基线不刷
-        else _rev = rv;
-        setTimeout(loop, 300);
-      })
-      .catch(()=>{ clearTimeout(to); setTimeout(loop, 2000); });   // 网络故障/被掐:2s 退避重试
-  })();
+    try{
+      const r = await fetch("api/rev/wait" + (_rev === null ? "?" : "?since=" + _rev + "&") + cv,
+                            {signal: _ctrl.signal});
+      seen((await r.json()).rev);
+      setTimeout(loop, 300);
+    }catch(_){ setTimeout(loop, 2000); }   // 网络故障/被掐:2s 退避重试
+    finally{ clearTimeout(to); }
+  };
+  loop();
   const probe = async ()=>{
     try{
-      const j = await fetch("api/rev/wait?cv=" + (window.CHAIMI_VER || "")).then(r=>r.json());
-      const rv = String(j.rev);
-      if(_rev === null){ _rev = rv; return; }      // 首轮只立基线（与 loop 同口径）
-      if(rv !== _rev){ _rev = rv; bump(); }
+      const r = await fetch("api/rev/wait?" + cv);
+      seen((await r.json()).rev);
     }catch(_){ bump(); }
   };
   const wake = ()=>{ if(_ctrl) _ctrl.abort(); probe(); };
