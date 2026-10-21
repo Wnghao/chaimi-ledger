@@ -582,7 +582,10 @@ function editRcpClear(){
 /* ===== 数据变更实时刷新（自 app.html 移入）=====
    长轮询 /api/rev/wait(方案B)——每个请求时长有限,可穿透会掐杀 SSE 无限流的缓冲网关;
    有变更立即返回,前端 300ms 内续上下一条,任意端记账其他端 1s 内刷新。
-   回前台(focus/pageshow/visible)兜底:掐掉可能半开的挂起请求 + 主动刷一次 */
+   回前台(focus/pageshow/visible)：掐掉可能半开的挂起请求 + 轻量探测——不带 since 的
+   wait 立即返回当前 rev,与本地基线相同则什么都不做(旧版无条件刷:每次切回 6~8 个
+   接口全重载,明细弹窗闪「加载中…」并丢选择态/滚动);真错过变更才刷,探测失败
+   (网络抖)保守刷一次,兜底性与旧版持平。探测独立于长轮询环,环卡死也能发现变更。 */
 (function(){
   let _rev = null, _t = null, _ctrl = null;
   const bump = ()=>{ clearTimeout(_t); _t = setTimeout(()=>{ if(typeof afterTxWrite === "function") afterTxWrite(); }, 800); };
@@ -601,7 +604,15 @@ function editRcpClear(){
       })
       .catch(()=>{ clearTimeout(to); setTimeout(loop, 2000); });   // 网络故障/被掐:2s 退避重试
   })();
-  const wake = ()=>{ if(_ctrl) _ctrl.abort(); bump(); };
+  const probe = async ()=>{
+    try{
+      const j = await fetch("api/rev/wait?cv=" + (window.CHAIMI_VER || "")).then(r=>r.json());
+      const rv = String(j.rev);
+      if(_rev === null){ _rev = rv; return; }      // 首轮只立基线（与 loop 同口径）
+      if(rv !== _rev){ _rev = rv; bump(); }
+    }catch(_){ bump(); }
+  };
+  const wake = ()=>{ if(_ctrl) _ctrl.abort(); probe(); };
   document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState === "visible") wake(); });
   addEventListener("focus", wake);
   addEventListener("pageshow", wake);

@@ -243,45 +243,56 @@ function renderDetail(items){
   return `<div class="sub" style="margin-bottom:6px">支出 ${fmt(e)} · 收入 ${fmt(i)} · 点击编辑</div>` +
     (items.filter(x=>!absorbed.has(x.id)).map(txRow).join("") || '<div class="sub">暂无流水</div>');
 }
-async function fillDayDetail(fetcher){   // 明细弹窗统一取数渲染（日/区间/分类/人情四个入口共用）
+async function fillDayDetail(fetcher, keep=false){   // 明细弹窗统一取数渲染（日/区间/分类/人情四个入口共用）
+  // keep=数据刷新（长轮询推送/回前台触发 dayRefresh）：旧内容保持到新数据到手，不再闪「加载中…」；
+  // 滚动位置还原，选择态存活（已删笔从选择集清洗），重渲染后由 txSelDecorate 重插勾选框
+  const body = document.querySelector("#dayMask .modal-body");
+  const sc = keep ? body.scrollTop : 0;
   try{
     const r = await fetcher();
+    if(keep && daySelOn()){
+      const live = new Set(r.items.map(x=>x.id));
+      for(const id of [...txSelSet]) if(!live.has(id)) txSelSet.delete(id);
+    }
     $("#dayList").innerHTML = renderDetail(r.items);
+    if(keep) body.scrollTop = sc;
+    if(daySelOn()) txSelDecorate();
   }catch(e){
-    $("#dayList").innerHTML = `<div class="sub">加载失败：${esc(e.message)}</div>`;
+    if(keep){ msg(`明细刷新失败：${e.message}`, false); }   // 刷新失败保留旧内容
+    else $("#dayList").innerHTML = `<div class="sub">加载失败：${esc(e.message)}</div>`;
   }
   dayEditVis();   // 成败都按当前内容重估「编辑」按钮（空列表/加载失败均应隐藏）
 }
-async function showDay(dd){
+async function showDay(dd, refresh){
   curDay = dd;
-  dayRefresh = () => showDay(dd);
-  showDetail(`${(+dd.slice(5,7))}月${(+dd.slice(8))}日 流水`, '<div class="sub">加载中…</div>',
+  dayRefresh = () => showDay(dd, true);
+  if(!refresh) showDetail(`${(+dd.slice(5,7))}月${(+dd.slice(8))}日 流水`, '<div class="sub">加载中…</div>',
     `<button class="btn btn-pri" style="width:100%" onclick="openAdd('${dd}')">＋ 记一笔</button>`);
-  await fillDayDetail(()=>api(`/api/transactions?ledger=${lid()}&from=${dd}&to=${dd}&page=1&page_size=100`));
+  await fillDayDetail(()=>api(`/api/transactions?ledger=${lid()}&from=${dd}&to=${dd}&page=1&page_size=100`), refresh);
 }
 /* 图表/卡片下钻：拉流水明细 */
-async function showTxDetail(title, params){
+async function showTxDetail(title, params, refresh){
   curDay = "";
-  dayRefresh = () => showTxDetail(title, params);
-  showDetail(title, '<div class="sub">加载中…</div>');
+  dayRefresh = () => showTxDetail(title, params, true);
+  if(!refresh) showDetail(title, '<div class="sub">加载中…</div>');
   // to 语义二选一：toExclusive=排他上界（下一周期首日裸日期，to_exclusive=1 服务端原样比较，
   // 对 10 位纯日期与 19 位带时间流水都正确排他）；默认=含当天的结束日（10 位裸日期，
   // 服务端膨胀为当天 23:59:59）。旧版补 " 00:00:00" 会把 10 位的边界日手工流水多算进来。
   const q = new URLSearchParams({ledger:lid(), page:1, page_size:100});
   for(const [k, v] of Object.entries(params)){ if(k !== "toExclusive") q.set(k, v); }
   if(params.toExclusive) q.set("to_exclusive", "1");
-  await fillDayDetail(()=>api("/api/transactions?"+q));
+  await fillDayDetail(()=>api("/api/transactions?"+q), refresh);
 }
 function showMonthDetail(month, type){
   const to = nextMonthFirst(month);
   showTxDetail(`${month} ${type==="income"?"收入":type==="expense"?"支出":"全部"}明细`,
     {from: month+"-01", to, toExclusive:true, ...(type?{type}:{})});
 }
-async function showCategoryDetail(catName, range, type){
-  dayRefresh = () => showCategoryDetail(catName, range, type);
+async function showCategoryDetail(catName, range, type, refresh){
+  dayRefresh = () => showCategoryDetail(catName, range, type, true);
   const rg = range || statRange || curStatRange(dtGet($("#monthSel")) || thisMonth());
   const flow = type || "expense";
-  showDetail(`${rg.label} · ${catName} 明细`, '<div class="sub">加载中…</div>');
+  if(!refresh) showDetail(`${rg.label} · ${catName} 明细`, '<div class="sub">加载中…</div>');
   // 旧的「拉区间前 200 条再前端过滤」在区间流水多时会漏掉该分类的流水。
   const top = categories.find(c=>c.name===catName && !c.parent_id && c.type===flow)
            || categories.find(c=>c.name===catName && !c.parent_id);
@@ -290,7 +301,7 @@ async function showCategoryDetail(catName, range, type){
   // 仅自定义区间的 to 是含当天的结束日 → 裸日期交服务端膨胀 23:59:59
   const excl = rg.toExclusive || appScope() !== "custom";
   await fillDayDetail(()=>api(`/api/transactions?ledger=${lid()}&from=${rg.from}&to=${encodeURIComponent(rg.to)}`
-    + `${excl ? "&to_exclusive=1" : ""}&category=${top.id}&page=1&page_size=500`));
+    + `${excl ? "&to_exclusive=1" : ""}&category=${top.id}&page=1&page_size=500`), refresh);
 }
 function openAdd(dateStr){   // 新增交易：预填日期（日历日视图传入 dd），类型默认支出
   txOpen("create", {date: dateStr});
@@ -554,10 +565,10 @@ function renderRenqing(){
   $("#renqingEmpty").textContent = rqList.length ? `没有匹配「${esc(q)}」的名称` : "暂无人情记录：分类为「人情往来」的流水会按名称显示在这里";
 }
 bindSearch($("#rq_q"), $("#rq_q_clear"), renderRenqing);
-async function showPersonDetail(person){
-  dayRefresh = () => showPersonDetail(person);
-  showDetail(`${person} · 人情明细`, '<div class="sub">加载中…</div>');
-  await fillDayDetail(()=>api(`/api/transactions?ledger=${lid()}&page=1&page_size=200&renqing_name=${encodeURIComponent(person)}`));
+async function showPersonDetail(person, refresh){
+  dayRefresh = () => showPersonDetail(person, true);
+  if(!refresh) showDetail(`${person} · 人情明细`, '<div class="sub">加载中…</div>');
+  await fillDayDetail(()=>api(`/api/transactions?ledger=${lid()}&page=1&page_size=200&renqing_name=${encodeURIComponent(person)}`), refresh);
 }
 
 let txSelMode = false;
