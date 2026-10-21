@@ -808,11 +808,11 @@ class ResolveIn(BaseModel):
     category_id: Optional[int] = None
     account_id: Optional[int] = None
     refund_for: Optional[int] = None
-    learn: bool = True
 
 @app.post("/api/pending/{tid}/resolve")
 def resolve_pending(tid: int, body: ResolveIn):
-    """处理待确认：改分类（可选 learn 回写映射）/ 关联退款。"""
+    """处理待确认：改分类 / 关联退款。改分类只对当笔负责（manual_cat 保护），
+    不回写学习映射——1.0.2 前这里会把用户手选泛化成该源分类的全局规则。"""
     c = conn()
     tx = c.execute("SELECT * FROM transactions WHERE id=?", (tid,)).fetchone()
     if not tx:
@@ -822,12 +822,6 @@ def resolve_pending(tid: int, body: ResolveIn):
             # 待确认里选分类=用户手选 → 打 manual_cat 标，数据修复不再翻动
             c.execute("UPDATE transactions SET category_id=?, need_confirm=0, manual_cat=1 WHERE id=?",
                       (body.category_id, tid))
-            # 仅当分类真的被用户改过才回写学习映射；原样确认不是用户意图，不学习。
-            # 学习键用导入时存进 ai_meta 的原始来源分类名（v6 前用 note，导入行常为空导致学不到）
-            if body.learn and body.category_id != tx["category_id"]:
-                src = (dbm.jloads(tx["ai_meta"]) or {}).get("map_source")
-                if src:
-                    dbm.upsert_mapping(c, tx["ledger_id"], tx["type"], src, body.category_id)
         if body.account_id is not None:
             c.execute("UPDATE transactions SET account_id=? WHERE id=?", (body.account_id, tid))
         if body.refund_for is not None:
@@ -998,12 +992,11 @@ class ConfirmIn(BaseModel):
     previews: list[dict]
     filename: str
     source: str
-    learn: bool = True
 
 @app.post("/api/import/confirm")
 def import_confirm(ledger: int, body: ConfirmIn):
     _ledger_or_404(ledger)
-    batch_id = ib.apply_import(conn(), ledger, body.previews, body.filename, body.source, body.learn)
+    batch_id = ib.apply_import(conn(), ledger, body.previews, body.filename, body.source)
     n = conn().execute("SELECT count FROM import_batches WHERE id=?", (batch_id,)).fetchone()[0]
     with conn() as c:
         group_names = {r["name"] for r in c.execute(

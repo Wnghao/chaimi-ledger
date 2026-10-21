@@ -1,4 +1,4 @@
-"""入库/撤销：批次事务（增强回填、learn、批内退款回填、rescan）与整批撤销。"""
+"""入库/撤销：批次事务（增强回填、批内退款回填、rescan）与整批撤销。"""
 from __future__ import annotations
 
 import sqlite3
@@ -34,17 +34,14 @@ def _backfill_pay_dupes(conn: sqlite3.Connection, previews: list[dict]) -> None:
                          args + [p["pay_dupe_of"]])
 
 def _insert_rows(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
-                 batch_id: int, learn: bool) -> None:
+                 batch_id: int) -> None:
     """逐行入库（跳过 duplicate/skip）。批内退款回填内聚于此（负序号 → 行id 映射）。
     批内退款关联的负数 id 先记 pending、整批插完后统一回填（退款行常排在原消费之前
     ——微信账单按时间倒序）。回填按**预览序号**查映射，不能按已插列表位置索引：
     前方存在被跳过的行（手动配对/无效行/跨源重复）时两者错位，旧版会把退款链到
     错误的行（真机错链的根因）。
-    learn：只学习用户在预览里手动改过的分类（user_changed 由前端 impSetCat 标记）。
-    自动结果(mapping/direct-name/keyword/AI)一律不回写——AI 兜底仅单次生效于当批流水；
-    用户手动纠正过的行(含纠正 AI 行)是用户意图，允许回写。
-    v6：目标直接用 category_id（旧版用 parent_category 文本，前端改分类不更新该字段
-    会学到旧分类名）；且同源唯一一行，统一走 dbm.upsert_mapping。"""
+    1.0.2 起不再回写学习映射——手动改分类（user_changed）只对当笔负责，
+    不把它泛化成该源分类的全局规则；要立规则去映射页手动加。"""
     inserted: dict[int, int] = {}
     pending_refund: list[tuple[int, int]] = []  # (退款预览序号, 目标预览序号)
     for pos, p in enumerate(previews):
@@ -54,11 +51,6 @@ def _insert_rows(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
         if rf is not None and rf < 0:
             pending_refund.append((pos, -rf - 1))
             rf = None
-        # 来源分类名存入 ai_meta：待确认队列改分类时用它做学习键（旧版用 note，导入行常为空）
-        if p.get("map_source"):
-            meta = p.get("ai_meta") or {}
-            meta["map_source"] = p["map_source"]
-            p["ai_meta"] = meta
         cur = conn.execute(
             """INSERT INTO transactions(ledger_id, type, amount, batch_id, category_id,
                account_id, to_account_id, date, note, name, merchant, tags, receipt_path,
@@ -75,9 +67,6 @@ def _insert_rows(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
              1 if p.get("user_changed") else 0,   # 预览里手动改过分类 → 修复不触碰
              p["row_hash"]))
         inserted[pos] = cur.lastrowid
-        if learn and p.get("user_changed") and p.get("map_source") and p.get("category_id"):
-            dbm.upsert_mapping(conn, ledger_id, p["type"], p["map_source"],
-                               p["category_id"], batch_id=batch_id)
     # 回填批内退款关联（顺序无关）：预览序号 → 真实行 id。
     # 目标不在本批（被跳过/重复行）则保持 NULL，交给反向补关联（7.7 匹配时机②）
     for row_pos, tgt_pos in pending_refund:
@@ -86,8 +75,8 @@ def _insert_rows(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
                          (inserted[tgt_pos], inserted[row_pos]))
 
 def apply_import(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
-                 filename: str, source: str, learn: bool = True) -> int:
-    """确认导入（7.8 ⑤~⑦），单事务四阶段：增强回填 → 建批次 → 逐行入库+learn+批内回填 → rescan。"""
+                 filename: str, source: str) -> int:
+    """确认导入（7.8 ⑤~⑦），单事务四阶段：增强回填 → 建批次 → 逐行入库+批内回填 → rescan。"""
     dates = [p["date"] for p in previews if _is_new_row(p)]
     with conn:
         _backfill_pay_dupes(conn, previews)
@@ -96,7 +85,7 @@ def apply_import(conn: sqlite3.Connection, ledger_id: int, previews: list[dict],
             "VALUES(?,?,?,?,datetime('now'),?,?)",
             (ledger_id, source, filename, len(dates), min(dates) if dates else "", max(dates) if dates else ""))
         batch_id = cur.lastrowid
-        _insert_rows(conn, ledger_id, previews, batch_id, learn)
+        _insert_rows(conn, ledger_id, previews, batch_id)
         # 反向补关联：本批新 expense 可能是此前未匹配退款行的原消费（7.7 匹配时机②）
         _rescan_unmatched_refunds(conn, ledger_id)
     return batch_id

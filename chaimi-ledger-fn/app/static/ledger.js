@@ -502,7 +502,7 @@ async function saveEditTx(confirm){
   try{
     await apiSend(`/api/transactions/${t.id}`, "PUT", body);
     if(confirm){
-      const rb = {learn:true};
+      const rb = {};
       if(it.category_id) rb.category_id = it.category_id;
       if(it.account_id && it.account_id !== t.account_id) rb.account_id = it.account_id;
       if(rfVis) rb.refund_for = editRefundSel || 0;

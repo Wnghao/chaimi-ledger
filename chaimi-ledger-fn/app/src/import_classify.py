@@ -2,7 +2,10 @@
 
 自愈（fix_candidates/_purge_bad_learned_mappings）自 1.0.1 起不再随导入解析自动执行——
 改为 /api/repair/preview 只读列出 + /api/repair/apply 用户确认后应用（真机事故：
-预览即改库把用户手动整理的分类静默翻回词典结果）。"""
+预览即改库把用户手动整理的分类静默翻回词典结果）。
+1.0.2 起手动改分类不再自动回写学习映射（改一笔只对当笔负责，泛化成全局规则是
+把单笔意图偷换成规则）——此后库里的 learned 映射均属历史遗留，修复区的
+映射冲突提示/重置只对旧数据有意义；要立规则去映射页手动加。"""
 from __future__ import annotations
 
 import re
@@ -91,6 +94,7 @@ def _resolve_by_mapping(conn: sqlite3.Connection, ledger_id: int, flow_type: str
 def mapping_reset_candidates(conn: sqlite3.Connection) -> list[dict]:
     """将被 _purge_bad_learned_mappings 删除的「与默认冲突的学习映射」只读预览：
     同源在 DEFAULT_MAPPINGS 有默认、但学习目标与默认不同 → 应用时删学习行、补种默认。
+    1.0.2 起手动改分类不再回写 learned，候选全部是历史遗留（旧版自动回写/手动改泛化）。
     ②（学习行=默认 → learned=0）与 ③（补种缺失默认）是无感归一化，不列入。"""
     out = []
     for lid in [r["id"] for r in conn.execute("SELECT id FROM ledgers")]:
@@ -338,7 +342,7 @@ def classify_flow(f: dict, ctx: ClassifyCtx, p: dict) -> None:
     p["category_id"] = top["id"] if top else None
     p["parent_category"] = top["name"] if top else (
         raw_cat or ("其他" if f["type"] == "expense" else "其他收入"))
-    # 记录来源分类名：用户在预览里纠正分类后回写学习映射的匹配键
+    # 记录来源分类名：AI 补名称的上下文（「交易类型」字段）；1.0.2 起不再作学习键
     if raw_cat:
         p["map_source"] = raw_cat
     p["category_name"] = p["parent_category"]

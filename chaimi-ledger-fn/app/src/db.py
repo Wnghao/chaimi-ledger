@@ -268,23 +268,6 @@ def seed_ledger_defaults(conn: sqlite3.Connection, ledger_id: int, accounts: boo
                 "INSERT INTO accounts(ledger_id, name, type, sort) VALUES(?,?,?,?)",
                 (ledger_id, name, "e-wallet" if name != "现金" else "cash", i))
 
-def upsert_mapping(conn: sqlite3.Connection, ledger_id: int, flow_type: str, source: str,
-                   category_id: int, learned: int = 1, batch_id: int | None = None) -> None:
-    """同源唯一一行（UNIQUE(ledger_id, flow_type, source)）：存在则 UPDATE，否则 INSERT。
-    batch_id 仅在给出时写入（导入回写带批次；待确认学习无批次）。"""
-    exist = conn.execute(
-        "SELECT id FROM category_mappings WHERE ledger_id=? AND flow_type=? AND source=?",
-        (ledger_id, flow_type, source)).fetchone()
-    if exist:
-        sets = "category_id=?, learned=?" + (", batch_id=?" if batch_id is not None else "")
-        args = (category_id, learned) + ((batch_id,) if batch_id is not None else ()) + (exist["id"],)
-        conn.execute(f"UPDATE category_mappings SET {sets} WHERE id=?", args)
-    else:
-        conn.execute(
-            "INSERT INTO category_mappings(ledger_id, flow_type, source, category_id, learned, batch_id) "
-            "VALUES(?,?,?,?,?,?)",
-            (ledger_id, flow_type, source, category_id, learned, batch_id))
-
 def top_cat_by_id(conn: sqlite3.Connection, ledger_id: int, cid: int) -> int | None:
     """按 id 取属于该账本的一级分类 id；不属于/非一级/不存在返回 None（server 映射校验用）。"""
     r = conn.execute(

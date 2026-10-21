@@ -204,7 +204,7 @@ async function loadRepair(){
   const bits = [];
   if(a) bits.push(`<b>${a}</b> 组重复账户可合并`);
   if(n) bits.push(`<b>${n}</b> 笔历史流水的分类与关键词词典不一致`);
-  if(m) bits.push(`<b>${m}</b> 条学习映射与内置默认冲突`);
+  if(m) bits.push(`<b>${m}</b> 条历史遗留的学习映射与内置默认冲突`);
   el.innerHTML = `检测到 ${bits.join("、")}（不会再自动修改）` +
     ` <a href="javascript:void(0)" onclick="repairDetail()" style="text-decoration:underline">查看</a>` +
     `<button class="btn btn-ghost" style="margin-left:8px;padding:2px 10px;font-size:12px" onclick="repairApply()">应用修复</button>`;
@@ -222,7 +222,7 @@ function repairDetail(){
   det.style.display = "";
 }
 async function repairApply(){
-  if(!await uiConfirm("应用修复：合并归一同名的重复账户、按词典纠正冲突分类、重置冲突学习映射。你手动设定过的分类不会被修改。", "应用修复")) return;
+  if(!await uiConfirm("应用修复：合并归一同名的重复账户、按词典纠正冲突分类、重置历史遗留的学习映射。你手动设定过的分类不会被修改。", "应用修复")) return;
   try{
     const r = await apiSend(`/api/repair/apply?ledger=${lid()}`, "POST", {});
     msg(`已合并 ${r.accounts_merged} 个账户，纠正 ${r.tx_fixed} 笔分类，重置 ${r.mappings_reset} 条映射`);
