@@ -511,6 +511,19 @@ async function saveEditTx(confirm){
     }else{
       msg("已保存 ✅");
     }
+    // 聊天里的确认卡/查账卡不在 afterTxWrite 刷新范围（只刷列表/统计/今日卡），保存后仍显旧值——
+    // 以原流水 t 为底按表单值重渲（删除路径 aiPurgeTxCard 同款）；_link_refund 会把关联退款强制为 transfer
+    const linked = rfVis ? (editRefundSel || 0) : (t.refund_for || 0);
+    const cat = categories.find(c=>c.id===it.category_id);
+    const acc = accounts.find(a=>a.id===it.account_id);
+    aiRefreshTxCard(Object.assign({}, t, {
+      type: linked ? "transfer" : it.type, amount: it.amount, date: it.date,
+      name: it.name || "", note: it.note || "", order_no: it.order_no || "",
+      category_name: cat ? cat.name : "", account_name: acc ? acc.name : "",
+      receipt_path: editRcp(), tags, need_confirm: confirm ? false : t.need_confirm,
+      refund_for: linked || null, parent_category: null,
+      refund_confidence: linked ? (confirm ? "high" : "") : t.refund_confidence,
+      refund_origin: linked ? (editRefundItems.find(x=>x.id===linked) || t.refund_origin || null) : null}));
     txClose(); afterTxWrite();
   }catch(e){
     msg("保存失败："+e.message, false);
@@ -666,6 +679,21 @@ async function txSelApply(){
       {ids:[...txSelSet], category_id:cat, attribution:attr, account_id:acc});
     txSelCloseModal();
     msg(`已修改 ${r.updated} 笔 ✅`);
+    // 批量改动同步聊天卡与 txCache：不在列表查询内的笔若缓存不更新，编辑弹窗的旧基线会被全量 PUT 回滚
+    const over = {};
+    if(cat) Object.assign(over, {category_id:cat, parent_category:null,
+      category_name:(categories.find(c=>c.id===cat) || {}).name || ""});
+    if(acc) Object.assign(over, {account_id:acc,
+      account_name:(accounts.find(a=>a.id===acc) || {}).name || ""});
+    txSelSet.forEach(id=>{
+      const t = txCache[id]; if(!t) return;
+      const o = Object.assign({}, t, over);
+      if(attr !== null){   // null=不改；""=清除；非空=写入（须按笔保留其余 tags 键）
+        o.tags = Object.assign({}, t.tags);
+        attr ? o.tags.attribution = attr : delete o.tags.attribution;
+      }
+      aiRefreshTxCard(o);
+    });
     txSelExit(false);   // 数据已变：afterTxWrite 全局刷新（内含 loadTx），无需再单独 loadTx
     afterTxWrite();
   }catch(e){

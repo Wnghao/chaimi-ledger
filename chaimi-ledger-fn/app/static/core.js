@@ -225,6 +225,7 @@ document.querySelectorAll(".sidebar .nav-item[data-p]").forEach(b=>b.onclick=()=
 const ledgerOptions = (ls, sel) => ls.map(l=>   // 账本下拉 option（顶栏/机器人设置页共用；有图标时图标与名字间自动空格）
   `<option value="${l.id}"${sel && l.id===sel ? " selected" : ""}>${l.icon ? esc(l.icon)+" " : ""}${esc(l.name)}</option>`).join("");
 async function loadAll(selectId){
+  txCache = {};   // 切账本/初始加载：旧缓存作废（openEdit 取不到即静默返回，挡住跨账本误编辑）
   const ls = await getLedgers(true);   // 强制刷新：账本切换/增删入口都走这里，缓存随之换血
   // localStorage 是根因修复：此前整页重载(登录页回来/刷新)后 keep 取自空 select 回落第一个账本，
   // 导致「新账本建用户，进入后却回到旧账本」（真机实测 bug）

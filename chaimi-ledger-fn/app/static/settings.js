@@ -363,6 +363,7 @@ async function restore(f){
   if(!await uiConfirm("恢复将覆盖当前全部数据，确定？", "恢复"))return;
   await apiSend("/api/restore","POST",{file:f});
   _cfgCache = null;   // 恢复会替换 chaimi.conf：配置缓存必须失效
+  $("#ai_msgs").innerHTML = ""; txCache = {};   // 库被整体替换：聊天流水卡与缓存全部作废
   msg("已恢复 ✅");loadAll();loadCfg();loadBkCfg();loadBotCfg();
 }
 

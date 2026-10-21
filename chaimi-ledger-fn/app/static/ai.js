@@ -448,8 +448,13 @@ function aiConfirmCard(items, ids){
   $("#ai_msgs").appendChild(d); scrollChat();
 }
 
+const chatTxCards = id => document.querySelectorAll(`#ai_msgs .tx-card[data-txid="${id}"]`);   // 聊天区该流水的全部卡（确认卡/查账卡）
+function aiRefreshTxCard(t){   // 编辑/批量修改后按新值就地重渲（txRow 顺手更新 txCache）
+  chatTxCards(t.id).forEach(el => el.outerHTML = txRow(t));
+}
 function aiPurgeTxCard(id){
-  document.querySelectorAll(`.bk-bubble .tx-card[data-txid="${id}"]`).forEach(el => el.remove());
+  chatTxCards(id).forEach(el => el.remove());
+  delete txCache[id];   // 防残留缓存被点开（已删的 id 再保存即 404）
   document.querySelectorAll(".bk-bubble").forEach(b => {
     const left = b.querySelectorAll(".tx-card").length;
     const head = b.querySelector(".sub");
