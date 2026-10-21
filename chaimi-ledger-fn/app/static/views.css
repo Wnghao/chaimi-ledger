@@ -92,8 +92,8 @@
 .ai-box input::placeholder,.ai-box textarea::placeholder{color:var(--muted);font-size:16px;line-height:1.5;font-family:inherit}
 .ai-box textarea::first-line{line-height:1.5}
 
-#txSearchBox{border:1px solid var(--border);box-shadow:none}
-#txSearchBox input{font-size:15px;line-height:22px;padding:4px 2px}
+#txSearchBox,#rqSearchBox{border:1px solid var(--border);box-shadow:none}   /* 流水/人情页搜索框同款 */
+#txSearchBox input,#rqSearchBox input{font-size:15px;line-height:22px;padding:4px 2px}
 
 .txf-item{border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-top:10px;background:var(--card)}
 .txf-item:first-child{margin-top:0}

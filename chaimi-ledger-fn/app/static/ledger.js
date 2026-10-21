@@ -3,22 +3,16 @@ let txPages = 1;
 
 let txRecentDefault = true;
 
-let qTimer = null;
-function onQText(){
-  $("#q_clear").style.display = $("#q_text").value ? "" : "none";
-  clearTimeout(qTimer);
-  qTimer = setTimeout(()=>{ txPageNo = 1; loadTx(); }, 350);
+/* 搜索框三件套（输入防抖 / 回车立即且不换行 / ✕ 清空）：流水与人情页共用 */
+function bindSearch(box, clearBtn, apply, delay){
+  let timer = null;
+  const run = now =>{ clearTimeout(timer); now ? apply() : timer = setTimeout(apply, delay || 350); };
+  box.addEventListener("input", ()=>{ clearBtn.style.display = box.value ? "" : "none"; run(false); });
+  box.addEventListener("keydown", e=>{ if(e.key === "Enter"){ e.preventDefault(); box.blur(); run(true); } });
+  clearBtn.addEventListener("click", ()=>{ box.value = ""; clearBtn.style.display = "none"; run(true); });
 }
-function onQKey(e){   // 回车：立即搜索（清掉未到点的防抖）且不换行
-  if(e.key === "Enter"){
-    e.preventDefault();
-    clearTimeout(qTimer);
-    $("#q_text").blur();
-    txPageNo = 1; loadTx();
-  }
-}
-function clearQText(){ $("#q_text").value = ""; $("#q_clear").style.display = "none"; txPageNo = 1; loadTx(); }
-// 待确认流水不满一页时直接落空显示「暂无流水」（搜索 onQText/clearQText 一直有重置，筛选没有）
+bindSearch($("#q_text"), $("#q_clear"), ()=>{ txPageNo = 1; loadTx(); });
+// 待确认流水不满一页时直接落空显示「暂无流水」（搜索/清空一直有重置页码，类型筛选没有）
 function setTypeFilter(b){ curTypeFilter=b.dataset.ft; txPageNo=1; document.querySelectorAll("#tab-list .fchip[data-ft]").forEach(x=>x.classList.toggle("on",x===b)); loadTx(); }
 async function loadTx(){
   $("#ftBase").textContent = txRecentDefault ? "最近" : "全部";
@@ -537,16 +531,29 @@ async function deleteEditTx(){
   msg("已删除"); txClose(); afterTxWrite();
 }
 
-/* ===== 人情往来 ===== */async function loadRenqing(){
-  const rq = await api(`/api/stats/renqing?ledger=${lid()}`);
-  document.querySelector("#renqingTable tbody").innerHTML = rq.map(r=>`<tr style="cursor:pointer" onclick="showPersonDetail('${qEsc(r.person)}')">
+/* ===== 人情往来 ===== */
+let rqList = [];   // 全量汇总（已按拼音排序）；搜索只前端过滤不重拉
+async function loadRenqing(){
+  rqList = await api(`/api/stats/renqing?ledger=${lid()}`);
+  rqList.sort((a,b)=>a.person.localeCompare(b.person, "zh-Hans-CN-u-co-pinyin"));   // 名称按拼音首字母（环境不支持时自动回退默认排序）
+  renderRenqing();
+}
+function renderRenqing(){
+  const q = $("#rq_q").value.trim();
+  const rq = rqList.filter(r=>!q || r.person.includes(q));
+  document.querySelector("#renqingTable tbody").innerHTML = rq.map(r=>{
+    const bal = r.received - r.given;   // 差额符号按净头寸：−=我多给出未收回，+=我收到更多（与后端 balance=given-received 相反）
+    return `<tr style="cursor:pointer" onclick="showPersonDetail('${qEsc(r.person)}')">
     <td><b>${esc(r.person)}</b></td>
     <td class="num c-exp" style="text-align:right">${fmt(r.given)}</td>
     <td class="num c-inc" style="text-align:right">${fmt(r.received)}</td>
-    <td class="num" style="text-align:right;font-weight:600;color:${r.balance>0?"var(--expense)":r.balance<0?"var(--income)":"var(--muted)"}">${r.balance>0?"+"+fmt(r.balance):r.balance<0?"−"+fmt(-r.balance):"0"}</td></tr>`).join("");
+    <td class="num" style="text-align:right;font-weight:600;color:${bal>0?"var(--income)":bal<0?"var(--expense)":"var(--muted)"}">${bal>0?"+"+fmt(bal):bal<0?"−"+fmt(-bal):"0"}</td></tr>`;
+  }).join("");
   $("#renqingEmpty").style.display = rq.length ? "none" : "block";
-  document.getElementById("renqingTable").style.display = rq.length ? "" : "none";
+  $("#renqingTable").style.display = rq.length ? "" : "none";
+  $("#renqingEmpty").textContent = rqList.length ? `没有匹配「${esc(q)}」的名称` : "暂无人情记录：分类为「人情往来」的流水会按名称显示在这里";
 }
+bindSearch($("#rq_q"), $("#rq_q_clear"), renderRenqing);
 async function showPersonDetail(person){
   dayRefresh = () => showPersonDetail(person);
   showDetail(`${person} · 人情明细`, '<div class="sub">加载中…</div>');

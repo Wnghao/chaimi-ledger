@@ -131,8 +131,8 @@
           </div>
           <div class="ai-box" id="txSearchBox">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:0 0 16px;opacity:.55"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <input id="q_text" type="text" name="tx-search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="搜索：名称 / 备注 / 金额 / 商户 / 分类 / 流水归属 / 订单号" oninput="onQText()" onkeydown="onQKey(event)">
-            <button class="icon-btn" id="q_clear" style="display:none;border:none;width:26px;height:26px" onclick="clearQText()" title="清空"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+            <input id="q_text" type="text" name="tx-search" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="搜索：名称 / 备注 / 金额 / 商户 / 分类 / 流水归属 / 订单号">
+            <button class="icon-btn" id="q_clear" style="display:none;border:none;width:26px;height:26px" title="清空"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           </div>
           <!-- 选择态工具条：左=全选+已选数，右=修改/完成 -->
           <div class="tx-selbar" id="txSelBar" style="display:none">
@@ -320,7 +320,12 @@
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <b>人情往来 · 全局汇总</b>
-          <span class="sub">按流水名称汇总 · 差额为我多给/少给的金额 · 点击名称看明细</span>
+          <span class="sub">按流水名称汇总 · 差额：−=我多给出、+=我收到更多 · 点击名称看明细</span>
+        </div>
+        <div class="ai-box" id="rqSearchBox" style="margin-top:10px">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:0 0 16px;opacity:.55"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input id="rq_q" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="搜索名称">
+          <button class="icon-btn" id="rq_q_clear" style="display:none;border:none;width:26px;height:26px" title="清空"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
         </div>
         <table id="renqingTable" style="margin-top:8px"><thead><tr><th>名称</th><th style="text-align:right">我给出</th><th style="text-align:right">我收到</th><th style="text-align:right">差额</th></tr></thead><tbody></tbody></table>
         <div class="sub" id="renqingEmpty" style="display:none;padding:8px 0">暂无人情记录：分类为「人情往来」的流水会按名称显示在这里</div>
