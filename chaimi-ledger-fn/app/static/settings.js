@@ -373,7 +373,7 @@ function botMcpCfgText(){
   return "前提: 模式选「网关」并保存——TCP 18710 自动监听（MCP 走此 HTTP 口，无需手动启动服务）\n" +
          "CHAIMI_BOT_URL=http://127.0.0.1:18710\n" +
          "CHAIMI_BOT_TOKEN=" + (_botTokenPlain || "<点「生成 / 重置」后自动填入>") + "\n" +
-         "command: python3 /usr/local/apps/@appcenter/chaimi-ledger/src/chaimi_mcp.py\n" +
+         "command: python3 /var/apps/chaimi-ledger/target/src/chaimi_mcp.py\n" +
          "超时: 工具调用设 120 秒（LLM 解析 2~10s，查账/月报可 20s+）\n" +
          "工具: ledger_message(text) / ledger_receipt(path_url) / ledger_status()";
 }

@@ -18,13 +18,36 @@ import config
 import db as dbm
 
 # 记账规则版本：随 ai.py 变更升级，启动日志打印，用于核对线上跑的是不是新代码
-RULES_VERSION = "1.0.0"
+RULES_VERSION = "1.1.6"
 applog.get("ai").info(f"booking rules v{RULES_VERSION} loaded")
 
 
 _NO_KEY_HINT = ("未配置 LLM Key：请到「设置」页填写 API Key。"
-                "配置后可用：一句话智能记账（自动分类、礼金人名识别、时段时间）、"
+                "配置后可用：一句话智能记账（自动分类、礼金人名识别、段时时间）、"
                 "小票拍照记账、月度分析、对话查账；未配置时记账仅本地规则兜底，日期为今天。")
+
+# 上游 LLM 报错 → 用户可读中文（"Error code: 400 - {...Arrearage...}" 这类原文用户看不懂；
+# 按子串匹配，命中给定向提示，未命中原样截断附在通用提示后便于排查）
+_ERR_ZH = (
+    ("arrearage", "LLM 服务账户欠费（阿里云百炼）：请到百炼控制台「费用中心」结清欠费后重试，"
+                  "或在设置页更换服务商 Key（智谱 / DeepSeek / 本地模型）"),
+    ("invalid_api_key", "API Key 无效或已过期：请到设置页检查 Key 是否填对"),
+    ("incorrect api key", "API Key 无效或已过期：请到设置页检查 Key 是否填对"),
+    ("model_not_exist", "所选模型不存在或无权限使用：请到设置页重新选择模型"),
+    ("rate limit", "请求太频繁或额度用尽：请稍后再试"),
+    ("timeout", "请求模型服务超时：请检查网络后重试"),
+    ("timed out", "请求模型服务超时：请检查网络后重试"),
+    ("connection", "无法连接模型服务：请检查网络或本地模型服务是否在线"),
+)
+
+
+def _zh_error(e) -> str:
+    raw = str(e)
+    low = raw.lower()
+    for key, zh in _ERR_ZH:
+        if key in low:
+            return zh
+    return "AI 服务异常：" + raw[:200]
 
 
 def _client() -> OpenAI | None:
@@ -243,6 +266,23 @@ def _booking_context(ledger_id: int) -> tuple[str, str, str]:
             "、".join(a["name"] for a in accs), few)
 
 
+def _member_roster(conn, ledger_id: int) -> str:
+    """成员（用户）清单，与统计页归属口径一致：用户=attribution_groups（顶栏记账人，
+    手动/AI 记账默认归属其名，不经 attributions 行——只查 attributions 会漏掉纯手动账本
+    的全部用户）；未归入用户的原始归属（平台导入产生）单列。用户在前，去重保序。"""
+    names = [r["name"] for r in conn.execute(
+        "SELECT name FROM attribution_groups WHERE ledger_id=? ORDER BY sort, id", (ledger_id,))]
+    names += [r["name"] for r in conn.execute(
+        "SELECT a.name FROM attributions a WHERE a.ledger_id=? AND a.group_id IS NULL "
+        "ORDER BY a.id", (ledger_id,))]
+    seen, out = set(), []
+    for nm in names:
+        if nm not in seen:
+            seen.add(nm)
+            out.append(nm)
+    return "、".join(out)
+
+
 def _resolve_account(ledger_id: int, name) -> int | None:
     """LLM 给的账户名 → 账户 id：先精确，再包含匹配（说「微信」→ 账户「微信支付」）。
     解析不到返回 None（前端草稿卡回落未指定/默认现金）。"""
@@ -445,9 +485,9 @@ def resolve_subcategories_batch(previews: list, ledger_id: int | None = None) ->
             if not (parent and (not names or parent in names)):
                 p["need_confirm"] = True
                 continue
+            text = f"{p.get('name','')} {p.get('merchant','')} {p.get('note','')}"
             # 重切「红包礼金」（＜200 的红包/转账红包不应建议人情往来）
             if parent == "人情往来":
-                text = f"{p.get('name','')} {p.get('merchant','')} {p.get('note','')}"
                 split = "红包礼金" if dbm.is_small_generic_packet(text, p.get("amount")) else "人情往来"
                 if split != parent and tops.get((ftype, split)):
                     parent = split
@@ -459,8 +499,7 @@ def resolve_subcategories_batch(previews: list, ledger_id: int | None = None) ->
             p["classified_via"] = "ai"
             # 与导入侧统一口径（renqing_need_confirm 收口）：人情往来直接入库，
             # 红包礼金带拼手气/群红包字样直接入库，其余小额红包仍待确认
-            p["need_confirm"] = (parent == "红包礼金" and dbm.renqing_need_confirm(
-                f"{p.get('name','')} {p.get('merchant','')} {p.get('note','')}"))
+            p["need_confirm"] = (parent == "红包礼金" and dbm.renqing_need_confirm(text))
             n += 1
     return n
 
@@ -516,32 +555,43 @@ def monthly_analysis(ledger_id: int, month: str) -> Iterator[dict]:
     conn = dbm.connect()
     summary = dbm.stats_summary(conn, ledger_id, month)
     cats = dbm.stats_category(conn, ledger_id, month)[:12]
+    arows = dbm.attribution_rows(conn, ledger_id, *dbm.month_range(month))
+    mem_txt = "；".join(f"{r['person']} {r['expense']/100:.2f}" for r in arows[:8] if r["expense"])
     stat_text = (
         f"{month} 汇总：毛支出 {summary['gross_expense']/100:.2f} 元，退款 {summary['refund_deduction']/100:.2f} 元，"
         f"净支出 {summary['net_expense']/100:.2f} 元，收入 {summary['income']/100:.2f} 元。\n"
-        "分类净支出（Top12）：" + "；".join(f"{c['name']} {c['net']/100:.2f}" for c in cats))
+        "分类净支出（Top12）：" + "；".join(f"{c['name']} {c['net']/100:.2f}" for c in cats)
+        + (f"\n成员支出（Top8）：{mem_txt}" if mem_txt else ""))
     model = config.load()["llm"]["model"]
     try:
         for piece in _stream(client, [
-            {"role": "system", "content": "你是个人财务分析师。基于给定统计数据输出简洁的月度分析：总体概况、Top 分类点评、异常点、下月节流建议。用中文，条理清晰，不超过 300 字。"},
+            {"role": "system", "content": "你是个人财务分析师。基于给定统计数据输出简洁的月度分析：总体概况、"
+                                          "Top 分类点评、成员支出点评（给了成员数据时）、异常点、下月节流建议。"
+                                          "用中文，条理清晰，不超过 300 字。"},
             {"role": "user", "content": stat_text}], model):
             yield {"text": piece}
     except Exception as e:
-        yield {"error": str(e)}
+        yield {"error": _zh_error(e)}
 
 
 CHAT_TOOLS = [{
     "type": "function",
     "function": {
         "name": "query_stats",
-        "description": "查询账本统计数据。支持：汇总(summary)、分类明细(category)、日历按日(calendar)。"
+        "description": "查询账本统计数据。支持：汇总(summary)、分类明细(category)、日历按日(calendar)、"
+                       "成员归属(attribution，每人支出/收入+人数+人均+每人差额，问『几个人/每位成员/每人/人均/"
+                       "平均/AA/谁花得最多/谁垫付』时用，旅行账单算 AA 必用)、按月趋势(trend，每月毛支出/收入/"
+                       "净支出序列，问『趋势/每月花多少/最近几个月对比』)、人情往来(renqing，每人给出/收到/"
+                       "未还差额，问『人情/随礼/谁没还礼』)、账户(account，每账户支出，问『每个账户/某账户"
+                       "花了多少』，type=income 时为每账户收入）、预算(budget，月预算×月数折算+剩余+是否超支，问『预算/还剩多少/超支没』)。"
                        "range=month 按月（默认）、year 按年、all 账本全部历史、custom 自定义日期区间"
                        "（from/to 为起止日，含当天，用于『上周/本周/某几天/最近N天』等区间问题）。"
                        "用户问'总共/一共/全部/累计'时用 all，问'某年'时用 year。",
         "parameters": {
             "type": "object",
             "properties": {
-                "kind": {"type": "string", "enum": ["summary", "category", "calendar"]},
+                "kind": {"type": "string", "enum": ["summary", "category", "calendar", "attribution",
+                                                    "trend", "renqing", "account", "budget"]},
                 "range": {"type": "string", "enum": ["month", "year", "all", "custom"], "description": "统计范围，默认 month"},
                 "month": {"type": "string", "description": "YYYY-MM，range=month 时生效，默认当月"},
                 "year": {"type": "string", "description": "YYYY，range=year 时生效，默认当年"},
@@ -586,6 +636,18 @@ CHAT_TOOLS = [{
 }]
 
 
+def _y(v: int) -> float:
+    """分值金额 → 元（保留两位）。"""
+    return round(v / 100, 2)
+
+
+def _attach(label: str, dfrom: str, dto: str, ft: str, cats: list, **extra) -> dict:
+    """查账图表附件（前端 aiStatsCard 的契约：环形图 + 下钻键）；cats 喂分值，前端 /100。
+    extra 携带维度标记（attribution/account=True 时前端换成成员/账户占比并禁用分类下钻）。"""
+    return {"label": label, "from": dfrom, "to": dto, "flow": ft,
+            "categories": cats, **extra}
+
+
 def _yuan(obj):
     """把工具结果里的分值金额统一转成元，避免模型把分当元。"""
     if isinstance(obj, dict):
@@ -593,8 +655,98 @@ def _yuan(obj):
     if isinstance(obj, list):
         return [_yuan(x) for x in obj]
     if isinstance(obj, int):
-        return round(obj / 100, 2)
+        return _y(obj)
     return obj
+
+
+def _settlement_plan(names: list, diffs: list) -> list:
+    """AA 最少转账结算方案（经典贪心：最大应收↔最大应付配对），全程分值整数运算。
+    前置条件：diffs 收支守恒（_attribution_tool 已把人均取整残差归一到支出最大者）。
+    模型自行心算「谁给谁多少」易错（真机踩过：欠 273.75 给出 335 的方案），
+    结算方案一律以此结果为准。"""
+    creds = sorted(((n, d) for n, d in zip(names, diffs) if d > 0), key=lambda x: -x[1])
+    debts = sorted(((n, -d) for n, d in zip(names, diffs) if d < 0), key=lambda x: -x[1])
+    plan: list = []
+    i = j = 0
+    while i < len(creds) and j < len(debts):
+        (nc, vc) = creds[i]
+        (nd, vd) = debts[j]
+        t = min(vc, vd)
+        if t > 0:
+            plan.append({"from": nd, "to": nc, "amount": t})
+        creds[i] = (nc, vc - t)
+        debts[j] = (nd, vd - t)
+        if creds[i][1] <= 0:
+            i += 1
+        if debts[j][1] <= 0:
+            j += 1
+    return plan
+
+
+def _attribution_tool(conn, ledger_id: int, dfrom: str, dto: str,
+                      label: str, ft: str) -> tuple[str, dict | None]:
+    """成员归属统计（人均/AA 场景）。金额显式走 _y 转元而不走 _yuan 递归——
+    它见整数就 /100，cnt/人数这类计数字段会被误当分值。人均与差额在分值上取整再转元，避免浮点漂移。"""
+    rows = dbm.attribution_rows(conn, ledger_id, dfrom, dto)
+    side = "income" if ft == "income" else "expense"
+    members = [{"name": r["person"], "cnt": r["cnt"],
+                "expense": _y(r["expense"]), "income": _y(r["income"]),
+                **({"group_members": [m["person"] for m in r["members"]]} if r["group"] else {})}
+               for r in rows]
+    vals = [r[side] for r in rows]
+    total = sum(vals)
+    n = len(rows)
+    avg = round(total / n) if n else 0
+    diffs = [v - avg for v in vals]
+    if n and sum(diffs):
+        # 人均取整残差（<n/2 分）记到支出最大者头上，diffs 恰好守恒——结算方案收支才能闭合
+        diffs[max(range(n), key=lambda i: vals[i])] -= sum(diffs)
+    for m, d in zip(members, diffs):
+        m["diff"] = _y(d)          # 该成员-人均：正=多垫付（应收），负=少付（应补）
+    result = {"label": label, "type": ft, "member_count": n, "total": _y(total),
+              "average": _y(avg),
+              "note": "金额单位元；average=总额÷有流水的成员数；diff=该成员-人均，"
+                      "正数多垫付应收、负数少付应补；settlement=算好的最少转账结算方案"
+                      "（谁给谁多少，收支已守恒），问 AA/结算时直接引用、不要自行计算；"
+                      "区间内没流水的成员不在 members 里，算 AA 时人数按对话上下文的成员清单为准",
+              "members": members,
+              "settlement": [{"from": p["from"], "to": p["to"], "amount": _y(p["amount"])}
+                             for p in _settlement_plan([m["name"] for m in members], diffs)]}
+    attach = _attach(label, dfrom, dto, ft,
+                     [{"name": r["person"], "net": v} for r, v in zip(rows, vals) if v > 0],
+                     attribution=True)
+    return json.dumps(result, ensure_ascii=False), attach
+
+
+def _budget_tool(conn, ledger_id: int, rng: str, month: str,
+                 dfrom: str, dto: str, label: str) -> dict:
+    """预算进度：ledgers.budget 为月预算（分），区间预算=月预算×月数（与设置页折算一致），
+    range=all 不折算只报净支出。percent 用 float——经 _yuan 时 int 会被误当分值除 100。"""
+    budget = conn.execute("SELECT budget FROM ledgers WHERE id=?",
+                          (ledger_id,)).fetchone()["budget"]
+    spend = (dbm.stats_summary(conn, ledger_id, month) if rng == "month"
+             else dbm.stats_summary_range(conn, ledger_id, dfrom, dto))["net_expense"]
+    if rng == "month":
+        months = 1
+    elif rng == "year":
+        months = 12
+    elif rng == "all":
+        months = 0
+    else:
+        end = datetime.date.fromisoformat(dto) - datetime.timedelta(days=1)   # dto 排他上界
+        months = (end.year * 12 + end.month) - (int(dfrom[:4]) * 12 + int(dfrom[5:7])) + 1
+    out = {"label": label, "spend": spend, "budget_monthly": budget}
+    if not budget:
+        out["note"] = "未设置月预算（设置页可配置）；spend 为该区间净支出"
+        return out
+    if months:
+        total = budget * months
+        out.update(budget_total=total, remaining=total - spend,
+                   percent=float(round(spend * 100 / total)) if total else None,
+                   note="budget_monthly=月预算，budget_total=月预算×月数；remaining<0 即超支")
+    else:
+        out["note"] = "「全部」范围不按预算折算（与设置页一致），仅报区间净支出"
+    return out
 
 
 def _run_tool(ledger_id: int, args: dict) -> tuple[str, dict | None]:
@@ -625,18 +777,47 @@ def _run_tool(ledger_id: int, args: dict) -> tuple[str, dict | None]:
         dfrom, dto = dbm.month_range(month)
         label = month
     ft = args.get("type") or "expense"   # 支出/收入侧（问收入必须传 income）
+    kind = args["kind"]
+    if kind == "attribution":
+        return _attribution_tool(conn, ledger_id, dfrom, dto, label, ft)
+    if kind == "trend":
+        # 按月趋势序列（每月毛支出/收入/净支出），文字回答即可，无图表附件
+        return ret(dbm.stats_trend(conn, ledger_id, dfrom, dto)), None
+    if kind == "renqing":
+        # 人情支持时间词：按问句区间取数（range=all 即全量，与统计页口径一致）
+        return ret(dbm.stats_renqing(conn, ledger_id, dfrom, dto)), None
+    if kind == "account":
+        names = {r["id"]: r["name"] for r in conn.execute(
+            "SELECT id, name FROM accounts WHERE ledger_id=? ORDER BY sort, id", (ledger_id,))}
+        if ft == "income":
+            vals = dbm.account_income_map(conn, ledger_id, dfrom, dto)
+        else:   # 支出侧=毛支出-退款转账（与统计页账户列表同口径）
+            vals = {a: g - rf
+                    for a, (g, rf) in dbm.account_spend_map(conn, ledger_id, dfrom, dto).items()}
+        key = "income" if ft == "income" else "spend"
+        accs = [{"name": names.get(a, "未指定"), key: v} for a, v in vals.items()]
+        accs += [{"name": nm, key: 0} for aid, nm in names.items() if aid not in vals]   # 区间零支出的账户也列出
+        accs.sort(key=lambda x: -x[key])
+        attach = _attach(label, dfrom, dto, ft,
+                         [{"name": a["name"], "net": a[key]} for a in accs if a[key] > 0],
+                         account=True)
+        return ret(accs), attach
+    if kind == "budget":
+        return ret(_budget_tool(conn, ledger_id, rng, month, dfrom, dto, label)), None
     # 附件图表数据：任何查账调用都附——该区间的一级分类净额环形图（stats_category_range 已按净额降序）
     cats = (dbm.stats_category(conn, ledger_id, month, ft) if rng == "month"
             else dbm.stats_category_range(conn, ledger_id, dfrom, dto, ft))
-    if args["kind"] == "summary":
+    if kind == "summary":
         result = (ret(dbm.stats_summary(conn, ledger_id, month)) if rng == "month"
                   else ret(dbm.stats_summary_range(conn, ledger_id, dfrom, dto)))
-    elif args["kind"] == "category":
+    elif kind == "category":
         result = ret(cats)   # 结果与附件同源，直接复用，不再二次查询
     else:
-        result = ret(dbm.stats_calendar(conn, ledger_id, month))
-    attach = {"label": label, "from": dfrom, "to": dto, "flow": ft,
-              "categories": [{"name": c["name"], "net": c["net"]} for c in cats]}
+        # 日历按问句区间取数（rng=month 时 dfrom/dto 即整月，与原口径等价）；
+        # 跨月自定义区间（如 11 月初问「上周」）整月口径会漏另一月的天
+        result = ret(dbm.stats_calendar(conn, ledger_id, month, dfrom, dto))
+    attach = _attach(label, dfrom, dto, ft,
+                     [{"name": c["name"], "net": c["net"]} for c in cats])
     hint = (args.get("category") or "").strip()
     if hint:
         # 命中判定与取数同一口径（评估 R-06）：先把简称归一化到规范分类名（「餐饮」→「餐饮美食」），
@@ -681,6 +862,7 @@ def _chat_llm(query: str, ledger_id: int) -> Iterator[dict]:
         return
     model = config.load()["llm"]["model"]
     cat_list, acc_list, few = _booking_context(ledger_id)
+    attr_list = _member_roster(dbm.connect(), ledger_id)
     nl = chr(10)
     system = (
         "你是记账助手，先判断用户这句话是记账还是查账：" + nl +
@@ -691,6 +873,22 @@ def _chat_llm(query: str, ledger_id: int) -> Iterator[dict]:
         "查账时间范围不预设，按用户问题解析：整月/某月/上月用 range=month，某年/去年用 range=year，"
         "问「总共/一共/全部/累计」用 range=all，周/区间/最近N天按下方日期锚点用 range=custom；"
         "问题没提时间则默认当月。" + nl +
+        "成员（归属，用户说的「用户/家里人/成员们/谁」即指账本成员）：" + (attr_list or "（暂无）") +
+        "。成员人数以此清单为准，问「几个用户/几个成员/都有谁」时直接按清单回答人数和名单。" + nl +
+        "问「几个人/每位成员/每人/人均/平均/AA/谁花得最多/谁垫付了」→ query_stats kind=attribution："
+        "结果自带总额、人数、人均、每人差额，直接引用结果里的数字，不要自己算；"
+        "成员列表竖向对齐：成员名右补空格到最长名的显示宽度（中文名按 2 个半角空格宽折算）"
+        "再接「：支出 X 元」，使冒号和金额上下对齐。输出纪律（严格遵守，宁可少给不可多给，"
+        "只回答用户问到的内容）：问「每人/各成员支出」时只报对齐的每人支出和总额，"
+        "人均、差额一律不得出现；人均只在问「人均/平均」时给；"
+        "差额只在问「AA/结算/谁垫付/差额」时给，且只报带正负号的数字"
+        "（正负号已表意，不缀「多付/少付」等解释文字）；"
+        "区间内没流水的成员不在结果里，算 AA 时结合上面的成员清单补足人数；"
+        "用户明确问 AA/怎么结算/谁该给谁多少钱时，转账方案直接引用结果的 settlement 字段"
+        "（后端已算好且收支守恒），严禁自行计算或改动谁给谁多少。" + nl +
+        "其他维度路由：问「趋势/每月花多少/最近几个月」→ kind=trend；「人情往来/随礼/谁没还礼」"
+        "→ kind=renqing（balance>0 即对方尚未还礼）；「每个账户/某账户花了多少」→ kind=account；"
+        "「预算/还剩多少/超支了吗」→ kind=budget——同样只回答问到的内容，列表类竖向对齐。" + nl +
         "同一回合只允许调用一次 create_transactions，且记账时不要调用 query_stats。" + nl +
         _AMOUNT_DATE_RULE + nl +
         _GIFT_RULE + nl +
@@ -731,7 +929,7 @@ def _chat_llm(query: str, ledger_id: int) -> Iterator[dict]:
                 yield {"text": piece}
             break
     except Exception as e:
-        yield {"error": str(e)}
+        yield {"error": _zh_error(e)}
     if booking is not None:
         items = _booking_items(booking.get("items") if isinstance(booking, dict) else None, ledger_id, query)
         if items:
@@ -782,7 +980,7 @@ def parse_receipt(path: str) -> dict:
     except Exception as e:
         # 带上 模型名@服务商域名:404 model_not_found 这类配置错位(视觉模型名与
         # base_url 服务商不匹配)用户可自行对照设置页排查
-        return {"error": f"小票识别失败（视觉模型 {model} @ {_host(cfg.get('vl_base_url') or cfg.get('base_url'))}）: {e}"}
+        return {"error": f"小票识别失败（视觉模型 {model} @ {_host(cfg.get('vl_base_url') or cfg.get('base_url'))}）：{_zh_error(e)}"}
 
 
 EDIT_ROUND_SYSTEM = (
@@ -843,12 +1041,14 @@ def chat(query: str, ledger_id: int) -> Iterator[dict]:
     """_chat_llm 的兜底包装（结构化事件流；HTTP 边界用 sse_stream 序列化，
     bot 通道直接消费事件不再解析 SSE 文本）：
     流中出现错误且无任何产出（无 Key/网络故障/解析失败）→ fix_local 正则拆分
-    补发 booking 事件（标题沿用 App 前端原版文案）。
+    补发 booking 事件（标题第一行 = 失败原因）。
     解析责任全在后端:LLM 可用走 LLM,不可用走正则,传输/前端层零感知。"""
     err = text_seen = booked = False
+    err_msg = ""
     for ev in _chat_llm(query, ledger_id):
         if "error" in ev:
             err = True
+            err_msg = ev["error"]
         elif "booking" in ev:
             booked = True
         elif "text" in ev:
@@ -857,9 +1057,10 @@ def chat(query: str, ledger_id: int) -> Iterator[dict]:
     if err and not booked and not text_seen:
         items = fix_local(query)
         if items:
-            # 两行标题:提示语一行,本地识别一行(微信端各占一行;App 的 HTML 渲染折叠为空格)
-            title = ("未配置 LLM Key（设置页填写后可用：自动分类、礼金人名识别、小票、"
-                     f"月度分析、对话查账）\n本地识别到 {len(items)} 笔，日期为今天，请核对")
+            # 两行标题:失败原因一行,本地识别一行(微信端各占一行;App 的 HTML 渲染折叠为空格)。
+            # 原因沿用错误事件里的中文提示（无 Key/_zh_error 翻译过的欠费/超时等），
+            # 不再一律写「未配置 LLM Key」——欠费时这句话会误导用户去查 Key
+            title = f"{err_msg}\n本地识别到 {len(items)} 笔，日期为今天，请核对"
             yield {"booking": {"items": items, "text": title}}
 
 

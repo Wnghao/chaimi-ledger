@@ -338,6 +338,7 @@ function aiStatsRange(st){
 function aiCatDetail(inp, q){
   const st = aiLastStats && aiLastStatsLid === lid() ? aiLastStats : null;
   if(!st) return false;
+  if(st.attribution || st.account) return false;   // 成员/账户维度附件：无「XX明细」分类下钻
   let nm = "";
   if(q === "对应明细") nm = st.category || "";
   else { const md = q.match(/^(.{1,12})明细$/); if(md) nm = md[1]; }
@@ -391,10 +392,12 @@ async function aiStatsCard(bubble, st){
   }
   // 无数据 / 未命中：区间完整分类环形图（可点击下钻）
   const cats = (st.categories||[]).filter(c=>c.net>0);
-  const title = st.category ? `${st.category}（该区间无${fw}数据）· ${st.label}`
+  const title = st.attribution ? `${fw}成员占比 · ${st.label}`
+            : st.account ? `${fw}账户占比 · ${st.label}`
+            : st.category ? `${st.category}（该区间无${fw}数据）· ${st.label}`
                             : `${fw}分类占比 · ${st.label}`;
   let html = `<div class="sub" style="margin-bottom:6px">${esc(title)}</div>`;
-  if(!cats.length){ box.innerHTML = html + `<div class="sub">该区间暂无${fw}</div>`; bubble.appendChild(box); scrollChat(); return; }
+  if(!cats.length){ box.innerHTML = html + `<div class="sub">该区间暂无${fw}</div>`; bubble.appendChild(box); return; }
   const top = cats.slice(0, 8);
   /* 图表与排版完全复用统计页：drawChart/renderLegend 画图下钻，
      .donut-row/.donut-box/.donut-legend 结构居中（气泡内只把圆图缩到 150px，见 views.css） */
@@ -405,7 +408,7 @@ async function aiStatsCard(bubble, st){
   box.innerHTML = html; bubble.appendChild(box);
   const drill = i => showCategoryDetail(top[i].name, rg, flow);
   await drawChart(cid, "doughnut", top.map(c=>c.name), top.map(c=>c.net/100), null,
-    (e, els)=>{ if(els && els.length) drill(els[0].index); }, lid, {responsive:false, label:fw});
+    (st.attribution || st.account) ? null : (e, els)=>{ if(els && els.length) drill(els[0].index); }, lid, {responsive:false, label:fw});
   scrollChat();
 }
 aiStatsCard._n = 0;   // 气泡内图表 id 序号（同一会话可出现多张环形图）

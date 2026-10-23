@@ -25,3 +25,6 @@ zcode-tmp-*
 
 # 测试（本地质量门禁，不入库；build.bat 打包前仍在本地跑）
 tests/
+
+# 构建脚本（本地专用，不入库）——Linux 侧对应版
+build.sh

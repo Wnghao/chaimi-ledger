@@ -24,7 +24,7 @@ description: 柴米记账(NAS)微信记账助手:一句话记账、小票识别�
 ```
 CHAIMI_BOT_URL=http://127.0.0.1:18710       # 同机默认;跑在 Docker 容器里连不到宿主机的 127.0.0.1
 CHAIMI_BOT_TOKEN=<生成的Token>
-command: python3 /usr/local/apps/@appcenter/chaimi-ledger/src/chaimi_mcp.py
+command: python3 /var/apps/chaimi-ledger/target/src/chaimi_mcp.py
 ```
 
 - 真机 chaimi-server 网关模式下在 UDS 之外并行监听 TCP 18710(默认仅 127.0.0.1,其余模式不监听);

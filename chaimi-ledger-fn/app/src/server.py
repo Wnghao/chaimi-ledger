@@ -462,26 +462,16 @@ def list_accounts(ledger: int, frm: str = Query("", alias="from"), to: str = "")
     # frm：形参不能叫 from（Python 关键字），query 名用 alias 保持 ?from=
     rows = [dict(r) for r in conn().execute(
         "SELECT * FROM accounts WHERE ledger_id=? ORDER BY sort, id", (ledger,))]
-    # 原来膨胀成 <=to 23:59:59 会把下月/下年第一天的流水多算进来
-    where = ("WHERE ledger_id=? AND (type='expense' OR "
-             "(type='transfer' AND refund_for IS NOT NULL)) AND account_id IS NOT NULL")
-    frag, params = _date_where(frm, to, "date")
-    where += frag
-    args = [ledger, *params]
-    gross, refund = {}, {}
-    for ty, a, amt in conn().execute(
-            f"SELECT type, account_id, amount FROM transactions {where}", args):
-        if ty == "expense":
-            gross[a] = gross.get(a, 0) + amt
-        else:                      # 退款转账：钱退回 account_id
-            refund[a] = refund.get(a, 0) + amt
+    # spend 口径（毛支出-退款转账）在 db.account_spend_map 唯一实现，与 AI kind=account 共用
+    spend_map = dbm.account_spend_map(conn(), ledger, frm, to)
     # 全量流水笔数（不受日期范围影响）：删账户确认框提示"将置空 N 笔"用，
     # 口径与 delete_account 的 UPDATE ... WHERE account_id=? 一致（不分类型）
     cnt = {r[0]: r[1] for r in conn().execute(
         "SELECT account_id, COUNT(*) FROM transactions "
         "WHERE ledger_id=? AND account_id IS NOT NULL GROUP BY account_id", (ledger,))}
     for r in rows:
-        r["spend"] = gross.get(r["id"], 0) - refund.get(r["id"], 0)
+        g, rf = spend_map.get(r["id"], (0, 0))
+        r["spend"] = g - rf
         r["tx_count"] = cnt.get(r["id"], 0)
     # 含未选账户的支出、退款按原消费日归因；与按账户拆分的 spend 列因口径差异可能不相等
     if frm or to:
@@ -545,10 +535,9 @@ class TxIn(BaseModel):
     need_confirm: bool = False
     refund_for: Optional[int] = None
 
-RENQING_NAME_SQL = "COALESCE(NULLIF(TRIM(t.name),''), NULLIF(TRIM(t.note),''), '（未命名）')"
-# 人情往来的取数条件：一级分类为「人情往来」（收支两侧同名分类都算）
-_RENQING_CAT_SQL = ("t.category_id IN (SELECT id FROM categories "
-                    "WHERE ledger_id=? AND name='人情往来' AND parent_id IS NULL)")
+# 人情往来取数口径：唯一实现在 db.py（stats_renqing 与人情明细过滤共用），此处别名保持引用不变
+RENQING_NAME_SQL = dbm.RENQING_NAME_SQL
+RENQING_CAT_SQL = dbm.RENQING_CAT_SQL
 
 @app.get("/api/transactions")
 def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str = "", type: str = "",
@@ -615,7 +604,7 @@ def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str
         sql.append("AND t.need_confirm=1")
     if renqing_name:
         # 人情明细：分类=人情往来 + 名称精确匹配（与 /api/stats/renqing 的分组键同一表达式）
-        sql.append(f"AND {_RENQING_CAT_SQL}")
+        sql.append(f"AND {RENQING_CAT_SQL}")
         sql.append(f"AND {RENQING_NAME_SQL} = ?")
         args += [ledger, renqing_name]
     if attribution:
@@ -872,52 +861,10 @@ def stats_category_range(ledger: int, _from: str = Query(..., alias="from"), to:
     return dbm.stats_category_range(conn(), ledger, _from, to, type)
 
 def _attribution_rows(ledger: int, _from: str, to: str) -> list[dict]:
-    """归属汇总：先按统计键、再按归属分组两级聚合。
-    有组的归属并成一行（person=组名，members=成员明细），无组按统计键单列。
-    统计页 /api/stats/attribution 与导出 xlsx 的「归属统计」sheet 共用。
-    _from/to 传空串表示不限制该端。"""
-    # App 手动/AI 记账（source=app，旧数据 manual）保持纯归属名——同一人手动与平台账单分列，符合「谁的哪个账」直觉
-    _PLAT = ("CASE t.source WHEN 'alipay' THEN '支付宝' WHEN 'wechat' THEN '微信' "
-             "WHEN 'jd' THEN '京东' WHEN 'meituan' THEN '美团' ELSE '' END")
-    _person = (f"json_extract(t.tags,'$.attribution') || "
-               f"CASE WHEN {_PLAT}='' THEN '' ELSE '·' || {_PLAT} END")
-    sql = (f"SELECT COALESCE(g.id, g2.id) AS gid, COALESCE(g.name, g2.name) AS group_name, "
-           f"{_person} AS person, COUNT(*) AS cnt, "
-           "SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END) AS expense, "
-           "SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END) AS income "
-           "FROM transactions t "
-           # 分组成员=归属名（非统计键）：剥平台后缀后查组，新导任一平台账单自动继承分组；
-           "LEFT JOIN attributions a ON a.ledger_id=t.ledger_id "
-           "AND a.name=json_extract(t.tags,'$.attribution') "
-           "LEFT JOIN attribution_groups g ON g.id=a.group_id "
-           "LEFT JOIN attribution_groups g2 ON g2.ledger_id=t.ledger_id "
-           "AND g2.name=json_extract(t.tags,'$.attribution') "
-           "WHERE t.ledger_id=? AND t.type IN ('expense','income') ")
-    args: list = [ledger]
-    frag, params = _date_where(_from, to)
-    sql += frag + " " + ("AND json_extract(t.tags,'$.attribution') IS NOT NULL "
-                         "AND TRIM(json_extract(t.tags,'$.attribution'))!='' "
-                         "GROUP BY g.id, person")
-    args += params
-    groups: dict[int, dict] = {}
-    plain: list[dict] = []
-    for r in conn().execute(sql, args):
-        row = {"person": r["person"], "cnt": r["cnt"], "expense": r["expense"], "income": r["income"]}
-        if r["gid"] is None:
-            row["group"] = False
-            plain.append(row)
-            continue
-        g = groups.setdefault(r["gid"], {"person": r["group_name"], "group": True,
-                                         "cnt": 0, "expense": 0, "income": 0, "members": []})
-        g["members"].append(row)
-        g["cnt"] += row["cnt"]
-        g["expense"] += row["expense"]
-        g["income"] += row["income"]
-    for g in groups.values():
-        g["members"].sort(key=lambda m: (m["expense"], m["income"]), reverse=True)
-    out = list(groups.values()) + plain
-    out.sort(key=lambda r: (r["expense"], r["income"]), reverse=True)
-    return out
+    """归属汇总：db.attribution_rows 唯一实现（统计页 /api/stats/attribution、导出 xlsx
+    「归属统计」sheet、AI 对话查账 kind=attribution 共用）。
+    _from/to 传空串表示不限制该端（宽区间等价实现）。"""
+    return dbm.attribution_rows(conn(), ledger, _from or "0000-01-01", to or "9999-12-31")
 
 @app.get("/api/stats/attribution")
 def stats_attribution(ledger: int, _from: str = Query(..., alias="from"), to: str = ...):
@@ -925,19 +872,9 @@ def stats_attribution(ledger: int, _from: str = Query(..., alias="from"), to: st
 
 @app.get("/api/stats/renqing")
 def stats_renqing(ledger: int):
-    """人情往来汇总：取数口径 = 分类「人情往来」，按流水名称分组。
-    given=我给出（支出）、received=我收到（收入），balance=given-received>0 即对方尚未还礼。
-    单条 GROUP BY 直接聚合（与 list_transactions 的 renqing_name 用同一套取数/分组表达式）。"""
-    rows = conn().execute(
-        f"SELECT {RENQING_NAME_SQL} AS person, "
-        "SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END) AS given, "
-        "SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END) AS received, "
-        "MAX(t.date) AS last "
-        "FROM transactions t "
-        f"WHERE t.ledger_id=? AND {_RENQING_CAT_SQL} "
-        f"GROUP BY {RENQING_NAME_SQL} "
-        "ORDER BY given - received DESC", (ledger, ledger)).fetchall()
-    return [{**dict(r), "balance": r["given"] - r["received"]} for r in rows]
+    """人情往来汇总：db.stats_renqing 唯一实现（统计页与 AI 查账 kind=renqing 共用）。
+    given=我给出（支出）、received=我收到（收入），balance=given-received>0 即对方尚未还礼。"""
+    return dbm.stats_renqing(conn(), ledger)
 
 # ---------- 导入 / 导出 ----------
 

@@ -337,9 +337,13 @@ def stats_summary_range(conn: sqlite3.Connection, ledger_id: int, dfrom: str, dt
     return {"gross_expense": r["gross"], "refund_deduction": refund,
             "net_expense": r["gross"] - refund, "income": r["income"]}
 
-def stats_calendar(conn: sqlite3.Connection, ledger_id: int, month: str) -> list[dict]:
-    """按日聚合：支出/收入/退款扣减（退款归因原消费日，按日查一次）。"""
-    dfrom, dto = month_range(month)
+def stats_calendar(conn: sqlite3.Connection, ledger_id: int, month: str,
+                   dfrom: str = "", dto: str = "") -> list[dict]:
+    """按日聚合：支出/收入/退款扣减（退款归因原消费日，按日查一次）。
+    dfrom/dto 缺省按 month 整月（统计页日历）；AI 对话传问句区间（如「上周每天」
+    跨月时整月口径会漏天）。dfrom 含端、dto 排他上界。"""
+    if not dfrom:
+        dfrom, dto = month_range(month)
     refunds: dict[str, int] = {}
     for r in conn.execute(
             "SELECT substr(o.date,1,10) AS day, SUM(r.amount) AS amt "
@@ -418,6 +422,116 @@ def stats_trend(conn: sqlite3.Connection, ledger_id: int, dfrom: str, dto: str) 
 def stats_yearly(conn: sqlite3.Connection, ledger_id: int) -> list[dict]:
     """全部数据按年聚合：{year, gross, income, net}。"""
     return _stats_by_period(conn, ledger_id, 4)
+
+def attribution_rows(conn: sqlite3.Connection, ledger_id: int, dfrom: str, dto: str) -> list[dict]:
+    """归属汇总：先按统计键、再按归属分组两级聚合（统计页 /api/stats/attribution、
+    导出 xlsx 归属 sheet、AI 对话查账 kind=attribution 三方共用，唯一实现防口径漂移）。
+    有组的归属并成一行（person=组名，members=成员明细），无组按统计键单列；
+    统计键 = 归属名[·平台]——app 手动/AI 记账保持纯归属名（同一人手动与平台账单分列），
+    导入平台账单带平台后缀。dfrom 含端、dto 排他上界（与其他 stats_* 一致）。"""
+    _PLAT = ("CASE t.source WHEN 'alipay' THEN '支付宝' WHEN 'wechat' THEN '微信' "
+             "WHEN 'jd' THEN '京东' WHEN 'meituan' THEN '美团' ELSE '' END")
+    _person = (f"json_extract(t.tags,'$.attribution') || "
+               f"CASE WHEN {_PLAT}='' THEN '' ELSE '·' || {_PLAT} END")
+    sql = (f"SELECT COALESCE(g.id, g2.id) AS gid, COALESCE(g.name, g2.name) AS group_name, "
+           f"{_person} AS person, COUNT(*) AS cnt, "
+           "SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END) AS expense, "
+           "SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END) AS income "
+           "FROM transactions t "
+           # 分组成员=归属名（非统计键）：剥平台后缀后查组，新导任一平台账单自动继承分组；
+           "LEFT JOIN attributions a ON a.ledger_id=t.ledger_id "
+           "AND a.name=json_extract(t.tags,'$.attribution') "
+           "LEFT JOIN attribution_groups g ON g.id=a.group_id "
+           "LEFT JOIN attribution_groups g2 ON g2.ledger_id=t.ledger_id "
+           "AND g2.name=json_extract(t.tags,'$.attribution') "
+           "WHERE t.ledger_id=:lid AND t.type IN ('expense','income') "
+           "AND t.date>=:dfrom AND t.date<:dto "
+           "AND json_extract(t.tags,'$.attribution') IS NOT NULL "
+           "AND TRIM(json_extract(t.tags,'$.attribution'))!='' "
+           "GROUP BY g.id, person")
+    groups: dict[int, dict] = {}
+    plain: list[dict] = []
+    for r in conn.execute(sql, {"lid": ledger_id, "dfrom": dfrom, "dto": dto}):
+        row = {"person": r["person"], "cnt": r["cnt"], "expense": r["expense"], "income": r["income"]}
+        if r["gid"] is None:
+            row["group"] = False
+            plain.append(row)
+            continue
+        g = groups.setdefault(r["gid"], {"person": r["group_name"], "group": True,
+                                         "cnt": 0, "expense": 0, "income": 0, "members": []})
+        g["members"].append(row)
+        g["cnt"] += row["cnt"]
+        g["expense"] += row["expense"]
+        g["income"] += row["income"]
+    for g in groups.values():
+        g["members"].sort(key=lambda m: (m["expense"], m["income"]), reverse=True)
+    out = list(groups.values()) + plain
+    out.sort(key=lambda r: (r["expense"], r["income"]), reverse=True)
+    return out
+
+# 人情往来取数口径：一级分类为「人情往来」（收支两侧同名分类都算）；
+# 名称取 COALESCE(name, note)，与流水列表的人情明细过滤（server.list_transactions）共用
+RENQING_NAME_SQL = "COALESCE(NULLIF(TRIM(t.name),''), NULLIF(TRIM(t.note),''), '（未命名）')"
+RENQING_CAT_SQL = ("t.category_id IN (SELECT id FROM categories "
+                   "WHERE ledger_id=? AND name='人情往来' AND parent_id IS NULL)")
+
+def _opt_bounds(dfrom: str, dto: str, col: str = "date") -> tuple[str, list]:
+    """可选区间过滤片段：dfrom 含端、dto 排他上界，空串不限
+    （stats_renqing / account_spend_map / account_income_map 共用，防边界语义漂移）。"""
+    frag, args = "", []
+    if dfrom:
+        frag += f" AND {col}>=?"
+        args.append(dfrom)
+    if dto:
+        frag += f" AND {col}<?"
+        args.append(dto)
+    return frag, args
+
+def stats_renqing(conn: sqlite3.Connection, ledger_id: int,
+                  dfrom: str = "", dto: str = "") -> list[dict]:
+    """人情往来汇总（原实现自 server.py 迁入：统计页 /api/stats/renqing 与 AI 查账共用，
+    单条 GROUP BY 直接聚合）。given=我给出（支出）、received=我收到（收入），
+    balance=given-received>0 即对方尚未还礼。统计页不传区间=全量；AI 按问句时间
+    传区间（dfrom 含端、dto 排他上界，空串不限）。"""
+    frag, bounds = _opt_bounds(dfrom, dto, "t.date")
+    rows = conn.execute(
+        f"SELECT {RENQING_NAME_SQL} AS person, "
+        "SUM(CASE WHEN t.type='expense' THEN t.amount ELSE 0 END) AS given, "
+        "SUM(CASE WHEN t.type='income'  THEN t.amount ELSE 0 END) AS received, "
+        "MAX(t.date) AS last "
+        "FROM transactions t "
+        f"WHERE t.ledger_id=? AND {RENQING_CAT_SQL}{frag} "
+        f"GROUP BY {RENQING_NAME_SQL} "
+        "ORDER BY given - received DESC", (ledger_id, ledger_id, *bounds)).fetchall()
+    return [{**dict(r), "balance": r["given"] - r["received"]} for r in rows]
+
+def account_spend_map(conn: sqlite3.Connection, ledger_id: int,
+                      dfrom: str = "", dto: str = "") -> dict:
+    """每账户 (毛支出, 退款) 金额（分）：expense 记在付款账户 account_id 上，
+    退款转账（refund_for 非空的 transfer）记在钱退回的 account_id 上；
+    account_id 为 NULL 的支出归入 None 键（未指定）。server 账户列表的 spend 列
+    与 AI kind=account 共用此口径。dfrom 含端、dto 排他上界，空串不限。"""
+    frag, bounds = _opt_bounds(dfrom, dto)
+    out: dict = {}
+    for ty, a, amt in conn.execute(
+            "SELECT type, account_id, amount FROM transactions "
+            "WHERE ledger_id=? AND (type='expense' OR "
+            f"(type='transfer' AND refund_for IS NOT NULL AND account_id IS NOT NULL)){frag}",
+            (ledger_id, *bounds)):
+        g, r = out.get(a, (0, 0))
+        out[a] = (g + amt, r) if ty == "expense" else (g, r + amt)
+    return out
+
+def account_income_map(conn: sqlite3.Connection, ledger_id: int,
+                       dfrom: str = "", dto: str = "") -> dict:
+    """每账户收入金额（分）：type='income' 记 account_id；NULL 归入 None 键（未指定）。
+    与 account_spend_map 的支出侧对应，AI kind=account 问「每账户收入」时用。
+    dfrom 含端、dto 排他上界，空串不限。"""
+    frag, bounds = _opt_bounds(dfrom, dto)
+    return {a: amt for a, amt in conn.execute(
+        "SELECT account_id, SUM(amount) FROM transactions "
+        f"WHERE ledger_id=? AND type='income'{frag} GROUP BY account_id",
+        (ledger_id, *bounds))}
 
 def tx_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
