@@ -28,3 +28,4 @@ tests/
 
 # 构建脚本（本地专用，不入库）——Linux 侧对应版
 build.sh
+deploy.sh
