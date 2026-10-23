@@ -18,7 +18,7 @@ import config
 import db as dbm
 
 # 记账规则版本：随 ai.py 变更升级，启动日志打印，用于核对线上跑的是不是新代码
-RULES_VERSION = "1.1.6"
+RULES_VERSION = "1.1.7"
 applog.get("ai").info(f"booking rules v{RULES_VERSION} loaded")
 
 
@@ -784,8 +784,13 @@ def _run_tool(ledger_id: int, args: dict) -> tuple[str, dict | None]:
         # 按月趋势序列（每月毛支出/收入/净支出），文字回答即可，无图表附件
         return ret(dbm.stats_trend(conn, ledger_id, dfrom, dto)), None
     if kind == "renqing":
-        # 人情支持时间词：按问句区间取数（range=all 即全量，与统计页口径一致）
-        return ret(dbm.stats_renqing(conn, ledger_id, dfrom, dto)), None
+        # 人情按问句区间取数（range=all 即全量）；结果包一层 note 说明 balance 方向——
+        # 方向解释只在这里存在一份，模型照念即可（真机踩过：没 note 时模型猜反差额含义）
+        rows = dbm.stats_renqing(conn, ledger_id, dfrom, dto)
+        return ret({"note": "given=我随出（支出）、received=我收到（收入）、"
+                            "balance=given-received：正数=我多给、对方尚未还礼；"
+                            "负数=我收得多、我尚未回礼（我欠对方），按此解释引用，不要自行推断方向",
+                    "persons": rows}), None
     if kind == "account":
         names = {r["id"]: r["name"] for r in conn.execute(
             "SELECT id, name FROM accounts WHERE ledger_id=? ORDER BY sort, id", (ledger_id,))}
@@ -887,7 +892,9 @@ def _chat_llm(query: str, ledger_id: int) -> Iterator[dict]:
         "用户明确问 AA/怎么结算/谁该给谁多少钱时，转账方案直接引用结果的 settlement 字段"
         "（后端已算好且收支守恒），严禁自行计算或改动谁给谁多少。" + nl +
         "其他维度路由：问「趋势/每月花多少/最近几个月」→ kind=trend；「人情往来/随礼/谁没还礼」"
-        "→ kind=renqing（balance>0 即对方尚未还礼）；「每个账户/某账户花了多少」→ kind=account；"
+        "→ kind=renqing（人情问句没提时间一律 range=all 全量，与统计页一致——人名的往来是历史概念，"
+        "默认当月会漏旧账；提到本月/今年等才按区间；balance 方向按结果 note 解释引用）；"
+        "「每个账户/某账户花了多少」→ kind=account；"
         "「预算/还剩多少/超支了吗」→ kind=budget——同样只回答问到的内容，列表类竖向对齐。" + nl +
         "同一回合只允许调用一次 create_transactions，且记账时不要调用 query_stats。" + nl +
         _AMOUNT_DATE_RULE + nl +
