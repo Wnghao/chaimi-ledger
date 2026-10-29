@@ -108,7 +108,7 @@ function ddPick(el, v){   // appScope 直接走 setScope；其余（年份）写
 }
 function scopeDD(){
   ddOpen($("#appScope"), [
-    {v:"month", t:"月"}, {v:"week", t:"周"}, {v:"year", t:"年"}, {v:"all", t:"全部"},
+    {v:"week", t:"周"}, {v:"month", t:"月"}, {v:"year", t:"年"}, {v:"all", t:"全部"},
     {v:"custom", t:"自定义", hidden: !_scopeHasCustom},
   ], curScopeVal);
 }
@@ -273,6 +273,9 @@ async function refreshStats(){
   const sc = appScope();
   const m = dtGet($("#monthSel")) || thisMonth();
   statRange = curStatRange();
+  // 趋势图标题随范围：周→按日、月/年→按月、全部→按年、自定义→按日
+  $("#trendTitle").textContent = (sc==="week" ? "日趋势" : sc==="all" ? "年度趋势"
+    : sc==="custom" ? "日趋势" : "月度趋势") + "（支出 / 收入）";
   let s, cats, catsInc, trend, trendIsYearly = false;
   if(sc === "month"){
     [s, cats, catsInc, trend] = await Promise.all([
@@ -290,7 +293,7 @@ async function refreshStats(){
       sc==="year"
         ? api(`/api/stats/monthly?ledger=${lid()}&year=${statRange.label.replace("年","")}`)
         : (sc==="custom" || sc==="week")
-          ? api(`/api/stats/trend?${q}`)   // 周：区间内日趋势（7 天），与自定义同口径
+          ? api(`/api/stats/trend?${q}${sc==="week" ? "&span=day" : ""}`)   // 周：按日分桶
           : api(`/api/stats/yearly?ledger=${lid()}`)]);
     trendIsYearly = sc === "all";
   }
@@ -407,6 +410,13 @@ async function refreshStats(){
           (e, els)=>{ const el = els[0]; const yv = trend[el.index].year;
             showTxDetail(`${yv}年 ${el.datasetIndex===1?"收入":"支出"}明细`,
               {from:`${yv}-01-01`, to:`${+yv+1}-01-01`, toExclusive:true, type: el.datasetIndex===1?"income":"expense"}); });
+      }else if(sc === "week"){
+        // 周度趋势（按日 7 根柱）：下钻当日明细
+        await drawChart("trendChart","bar", trend.map(t=>t.day.slice(5)),
+          trend.map(t=>t.net/100), trend.map(t=>t.income/100),
+          (e, els)=>{ const el = els[0]; const d = trend[el.index].day;
+            showTxDetail(`${d} ${el.datasetIndex===1?"收入":"支出"}明细`,
+              {from:d, to:weekShift(d,1), toExclusive:true, type: el.datasetIndex===1?"income":"expense"}); });
       }else{
         // 月度趋势（按月/按年/自定义区间共用）：下钻用数据自身的月份，兼容自定义跨年区间
         await drawChart("trendChart","bar", trend.map(t=>t.month.slice(5)+"月"),
@@ -472,6 +482,7 @@ async function drawChart(id, type, labels, data, data2, onClick, legendId, opts)
     hoverBorderColor: doughnutBorder, label:"收入", borderRadius:6});
   charts[id] = new Chart($("#"+id), {type, data:{labels, datasets:ds},
     /* 容器均固定高度：maintainAspectRatio 必须为 false，否则 canvas 按自身宽高比撑高溢出卡片 */
+    plugins: fixed ? [] : [amtLabelPlugin],   // 统计页图表直标金额；AI 气泡小图不标
     options:{responsive:!fixed, maintainAspectRatio:false, onClick: onClick||undefined,
       elements:{arc:{borderColor: doughnutBorder, borderWidth: doughnutBorderWidth, hoverOffset: type==="doughnut" ? 4 : 0, hoverBorderColor: doughnutBorder}},
       plugins:{legend:{display:false, labels:{color:tc.fg}},
@@ -487,6 +498,46 @@ async function drawChart(id, type, labels, data, data2, onClick, legendId, opts)
   if(onClick) chartDrill[id] = (i)=>onClick(null,[{index:i}]);
   if(legendId) renderLegend(legendId, id, labels, data);
 }
+
+/* 金额直标插件：柱状图画柱顶、环形图画扇区中线；AI 气泡小图跳过（fixed）。
+   环形 <4% 的小扇区不标（防重叠，金额看图例）。*/
+const amtLabelPlugin = {
+  id: "amtLabels",
+  afterDatasetsDraw(chart){
+    const ctx = chart.ctx;
+    const isDark = document.body.dataset.theme === "dark";
+    const fmtV = v => "¥" + (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("zh-CN")
+                             : (+v).toFixed(2).replace(/\.?0+$/, ""));
+    ctx.save();
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    if(chart.config.type === "bar"){
+      ctx.fillStyle = isDark ? "rgba(255,255,255,.85)" : "rgba(15,23,42,.72)";
+      chart.data.datasets.forEach((ds, di) => {
+        if(chart.isDatasetVisible(di) === false) return;
+        const meta = chart.getDatasetMeta(di);
+        meta.data.forEach((bar, i) => {
+          const v = ds.data[i];
+          if(v == null || !v) return;
+          ctx.fillText(fmtV(v), bar.x, bar.y - 4);
+        });
+      });
+    }else if(chart.config.type === "doughnut"){
+      ctx.fillStyle = "rgba(255,255,255,.95)";
+      const total = chart.data.datasets[0].data.reduce((a,b)=>a+(+b||0), 0);
+      if(!total) { ctx.restore(); return; }
+      const meta = chart.getDatasetMeta(0);
+      meta.data.forEach((arc, i) => {
+        const v = chart.data.datasets[0].data[i];
+        if(!v || v/total < 0.04) return;
+        const mid = (arc.startAngle + arc.endAngle) / 2;
+        const r = (arc.outerRadius + arc.innerRadius) / 2;
+        ctx.fillText(fmtV(v), arc.x + Math.cos(mid)*r, arc.y + Math.sin(mid)*r);
+      });
+    }
+    ctx.restore();
+  }
+};
 
 function dropCharts(){
   Object.values(charts).forEach(c=>{ try{ c.destroy(); }catch(_){} });

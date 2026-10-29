@@ -879,9 +879,10 @@ def stats_yearly(ledger: int):
     return dbm.stats_yearly(conn(), ledger)
 
 @app.get("/api/stats/trend")
-def stats_trend_range(ledger: int, _from: str = Query(..., alias="from"), to: str = ...):
-    """任意区间的按月趋势。"""
-    return dbm.stats_trend(conn(), ledger, _from, to)
+def stats_trend_range(ledger: int, _from: str = Query(..., alias="from"), to: str = ...,
+                      span: str = "month"):
+    """区间趋势：span=month 按月分桶（缺省）；span=day 按日分桶（周范围日趋势）。"""
+    return dbm.stats_trend(conn(), ledger, _from, to, 10 if span == "day" else 7)
 
 @app.get("/api/stats/range")
 def stats_range(ledger: int, _from: str = Query(..., alias="from"), to: str = ...):

@@ -9,7 +9,7 @@ import hashlib
 import json
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import config
 
@@ -581,7 +581,7 @@ def stats_category_range(conn: sqlite3.Connection, ledger_id: int, dfrom: str, d
 
 def _stats_by_period(conn: sqlite3.Connection, ledger_id: int, span: int,
                      dfrom: str = "", dto: str = "") -> list[dict]:
-    """按月(span=7)/按年(span=4)聚合：gross/income 单查询，net 需逐段查退款。
+    """按月(span=7)/按日(span=10)/按年(span=4)聚合：gross/income 单查询，net 需逐段查退款。
     月度可带区间，年度为全量数据。"""
     where = " AND t.date>=? AND t.date<?" if dfrom else ""
     rows = conn.execute(
@@ -595,6 +595,11 @@ def _stats_by_period(conn: sqlite3.Connection, ledger_id: int, span: int,
         if span == 7:
             seg_from, seg_to = r["p"] + "-01", _next_month(r["p"])
             key, k = r["p"], "month"
+        elif span == 10:
+            # 按日桶（周范围日趋势）：退款归因当日；次日排他
+            seg_from = r["p"]
+            seg_to = (datetime.strptime(r["p"], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+            key, k = r["p"], "day"
         else:
             seg_from, seg_to = f"{r['p']}-01-01", f"{int(r['p']) + 1}-01-01"
             key, k = r["p"], "year"
@@ -603,8 +608,9 @@ def _stats_by_period(conn: sqlite3.Connection, ledger_id: int, span: int,
                     "net": r["gross"] - refund})
     return out
 
-def stats_trend(conn: sqlite3.Connection, ledger_id: int, dfrom: str, dto: str) -> list[dict]:
-    return _stats_by_period(conn, ledger_id, 7, dfrom, dto)
+def stats_trend(conn: sqlite3.Connection, ledger_id: int, dfrom: str, dto: str,
+                span: int = 7) -> list[dict]:
+    return _stats_by_period(conn, ledger_id, span, dfrom, dto)
 
 def stats_yearly(conn: sqlite3.Connection, ledger_id: int) -> list[dict]:
     """全部数据按年聚合：{year, gross, income, net}。"""
