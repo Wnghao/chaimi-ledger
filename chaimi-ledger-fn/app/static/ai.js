@@ -138,8 +138,9 @@ const ICON_SVG = {
 };
 const _svgWrap = inner => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
 function txIcon(t){
-  /* 图形按分类（ICON_SVG），底色/字色按分类色系（CAT_SKIN 单源），双 fallback 到收支语义色 */
-  const cat = t.category_name || "";
+  /* 图形按分类（ICON_SVG），底色/字色按分类色系（CAT_SKIN 单源，任意层级沿父链取根），
+     双 fallback 到收支语义色 */
+  const cat = catSkinName(t) || t.category_name || "";
   const skin = CAT_SKIN[cat];
   const bg = skin ? `var(${skin[1]})` : (ICON_BG_FB[t.type] || ICON_BG_FB.transfer);
   const fg = skin ? `var(${skin[0]})` : (ICON_FG_FB[t.type] || ICON_FG_FB.transfer);
@@ -204,6 +205,7 @@ function txRow(t, mode){
   else if(pv && t.skip && t._pvSkip) tags.push(`<button class="tag dup-hint" onclick="impSkipRow(${t._pvIdx})">已跳过 · 点此恢复</button>`);
   else if(pv && t.dup_hint) tags.push(`<button class="tag dup-hint" title="${esc(dupHintText(t.dup_hint))}" onclick="impSkipRow(${t._pvIdx})">疑似重复 点击跳过</button>`);
   tags.push(...confTags(t));
+  if(!pv) tags.unshift(catChip(t));   // 流水行：分类徽章置首（副行不再重复显示分类）
   const srcTag = t.source && t.source!=="manual" ? `<span class="tag plain tx-src">${t.source}</span>` : "";
   const rcpTag = t.receipt_path ? `<span class="tag plain tx-src" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>` : "";
   // 源栈：jd 在上、小票在下；只有其中一个时单独显示
@@ -239,7 +241,7 @@ function txRow(t, mode){
       </div>
     </div>`;
   }
-  const catSlug = t.parent_category || t.category_name || t.type || "";
+  const catSlug = catSkinName(t) || t.parent_category || t.category_name || t.type || "";
   if(pv || !t.refund_origin){
     // 分类依据悬浮：预览行上直接看出这行分到当前分类的来源（词典/映射/同名/AI/兜底/手动）
     const viaTip = pv && t.classified_via
@@ -249,15 +251,18 @@ function txRow(t, mode){
     const cardAttr = pv
       ? ` data-pv-idx="${t._pvIdx}"${(t.duplicate || t.skip) ? ' style="opacity:.45"' : ''} data-cat="${esc(catSlug)}"${viaTip}`
       : ` onclick="openEdit(${t.id})" data-cat="${esc(catSlug)}"${t.id ? ` data-txid="${t.id}"` : ""}`;
-    return `<div class="tx-card"${cardAttr}>${makeRow(t, {tags, catHtml, srcStack})}</div>`;
+    // 非预览：分类已由徽章展示，副行不再重复（catHtml 传空串 = makeRow 副行跳过该字段）
+    return `<div class="tx-card"${cardAttr}>${makeRow(t, {tags, catHtml: pv ? catHtml : "", srcStack})}</div>`;
   }
   const ro = t.refund_origin;
   // 第二行 onclick 调 openEdit(ro.id) 时取不到数据会静默 return → 看起来"第二行点不动"。
   // 这里在渲染双行卡时把原交易一并缓存，第二行即可正常打开编辑。
   txCache[ro.id] = ro;
   const refundTags = confTags(t);
+  refundTags.unshift(catChip(t));
   if(t.receipt_path) refundTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>`);
   const roTags = [];
+  roTags.unshift(catChip(ro));
   if(ro.receipt_path) roTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(ro.receipt_path)}')">🧾</span>`);
   // 例：原支出 4996 + 退款入账 4996 = 0（已全额抵销），而非 9992
   const net = signed(ro.type, ro.amount) + signed(t.type, t.amount);
@@ -265,8 +270,8 @@ function txRow(t, mode){
   const netVal = fmt(Math.abs(net));
   const netColor = net > 0 ? "var(--income)" : net < 0 ? "var(--expense)" : "var(--muted)";
   const netTitle = net > 0 ? "净收入" : net < 0 ? "实际花费" : "已全额抵销";
-  const refundRow = makeRow(t, {tags: refundTags, clickAttr: ""});
-  const originRow = makeRow(ro, {tags: roTags, clickAttr: ` onclick="event.stopPropagation();openEdit(${ro.id})"`});
+  const refundRow = makeRow(t, {tags: refundTags, catHtml: "", clickAttr: ""});
+  const originRow = makeRow(ro, {tags: roTags, catHtml: "", clickAttr: ` onclick="event.stopPropagation();openEdit(${ro.id})"`});
   // 两者包进同一 .tx-side wrapper 内部横向排列，整体贴右
   const sideSrc = t.source && t.source!=="manual"
     ? `<span class="tag plain">${t.source}</span>` : "";

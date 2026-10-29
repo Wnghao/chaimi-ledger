@@ -53,6 +53,28 @@ const CAT_SKIN = {
   st.textContent = rules.join("\n");
   document.head.appendChild(st);
 })();
+/* ===== 任意层级分类：链路解析与流水分类徽章（2026-10-29） ===== */
+function catChain(id){   // 分类 id → [根...叶子]（categories 缓存内解析；未知返回 []）
+  const by = {};
+  categories.forEach(c => by[c.id] = c);
+  const parts = [];
+  let cur = by[id], n = 0;
+  while(cur && n < 8){ parts.unshift(cur.name); cur = by[cur.parent_id]; n++; }
+  return parts;
+}
+function catSkinName(t){   // 分类色系键：沿父链上溯到根（CAT_SKIN 按一级名配色，口径不变）
+  const chain = catChain(t.category_id);
+  return chain[0] || t.parent_category || t.category_name || "";
+}
+function catChip(t){   // 流水行分类徽章：叶子名 + 全路径 tooltip + 根类配色（与 txIcon 同源）
+  const chain = catChain(t.category_id);
+  const leaf = t.category_name || chain[chain.length - 1] || "";
+  if(!leaf) return "";
+  const root = chain[0] || t.parent_category || leaf;
+  const skin = CAT_SKIN[root];
+  const style = skin ? ` style="color:var(${skin[0]});background:var(${skin[1]})"` : "";
+  return `<span class="tag"${style} title="${esc(chain.length ? chain.join(" / ") : leaf)}">${esc(leaf)}</span>`;
+}
 let _chartLoading = null;
 function loadChart(){   // Chart.js 按需加载：只有统计页与 AI 图表附件用到，不进首屏
   if(window.Chart) return Promise.resolve();
