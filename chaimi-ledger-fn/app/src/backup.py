@@ -242,7 +242,9 @@ def webdav_upload(name: str) -> dict:
     src = _locate(name)
     _dav_mkdir(cfg)
     uploaded = []
-    for f in [src] + [p for p in sorted(src.parent.glob(src.stem + ".*")) if p.is_file()]:
+    for f in sorted(src.parent.glob(src.stem + ".*")):   # glob 已含主文件与全部副文件
+        if not f.is_file():
+            continue
         data = f.read_bytes()
         with _dav_open("PUT", _dav_url(cfg, cfg.get("dir") or "", f.name), cfg, data=data) as r:
             r.read()
