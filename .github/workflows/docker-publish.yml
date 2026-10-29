@@ -1,0 +1,133 @@
+name: Build and Push Docker Image
+
+# 打 v* 标签发布正式版；推 main 或手动触发构建 latest（仅 GHCR）
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
+  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/chaimi-ledger
+
+jobs:
+  build-push:
+    name: Build ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.GHCR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=chaimi-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          cache-to: type=gha,mode=max,scope=chaimi-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          provenance: false
+          sbom: false
+
+      - name: Export digest
+        run: |
+          test -n "${{ steps.build.outputs.digest }}"
+          mkdir -p "$RUNNER_TEMP/digests"
+          printf '%s\n' "${{ steps.build.outputs.digest }}" > "$RUNNER_TEMP/digests/${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: ${{ runner.temp }}/digests/*.txt
+          if-no-files-found: error
+
+  merge-manifest:
+    name: Merge manifest
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digests-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge into version + latest tags
+        env:
+          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
+          REF: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sources=()
+          for f in "$RUNNER_TEMP"/digests/*.txt; do
+            digest="$(tr -d '\n' < "$f")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            sources+=("${GHCR_IMAGE}@${digest}")
+          done
+          [[ ${#sources[@]} -eq 2 ]]
+
+          # tag 推送：版本号 + latest 都打；main/手动：只刷 latest
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            docker buildx imagetools create -t "${GHCR_IMAGE}:${GITHUB_REF_NAME}" "${sources[@]}"
+            docker buildx imagetools create -t "${GHCR_IMAGE}:latest" "${sources[@]}"
+          else
+            docker buildx imagetools create -t "${GHCR_IMAGE}:latest" "${sources[@]}"
+          fi
+          docker buildx imagetools inspect "${GHCR_IMAGE}:${REF}"
+
+      - name: Mirror to Docker Hub（配置了 secrets 才推）
+        if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+        env:
+          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            docker buildx imagetools create -t "${DOCKERHUB_IMAGE}:${GITHUB_REF_NAME}" "${GHCR_IMAGE}:${GITHUB_REF_NAME}"
+            docker buildx imagetools create -t "${DOCKERHUB_IMAGE}:latest" "${GHCR_IMAGE}:latest"
+          else
+            docker buildx imagetools create -t "${DOCKERHUB_IMAGE}:latest" "${GHCR_IMAGE}:latest"
+          fi

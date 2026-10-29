@@ -1,0 +1,25 @@
+# git
+.git/
+.github/
+.gitignore
+
+# 文档与截图
+*.md
+screenshots/
+LICENSE
+
+# 飞牛 fpk 打包链（容器化用不到）
+build.bat
+chaimi-ledger-fn/cmd/
+chaimi-ledger-fn/config/
+chaimi-ledger-fn/wizard/
+chaimi-ledger-fn/manifest
+chaimi-ledger-fn/app/server/
+chaimi-ledger-fn/app/data/
+
+# 本地开发产物
+**/__pycache__/
+*.pyc
+tests/
+Dockerfile
+.dockerignore
