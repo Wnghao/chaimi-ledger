@@ -86,7 +86,7 @@ function dtRender(){
 }
 
 let _scopeHasCustom = true, _yearOpts = [];
-const SC_LABEL = {month:"月", year:"年", all:"全部", custom:"自定义"};
+const SC_LABEL = {month:"月", year:"年", week:"周", all:"全部", custom:"自定义"};
 function ddOpen(el, opts, cur){   // cur=选中值（缺省取 el.value）；显示文案与取值可分离
   const pop = $("#ddPop");
   const curV = cur !== undefined ? cur : el.value;
@@ -108,7 +108,7 @@ function ddPick(el, v){   // appScope 直接走 setScope；其余（年份）写
 }
 function scopeDD(){
   ddOpen($("#appScope"), [
-    {v:"month", t:"月"}, {v:"year", t:"年"}, {v:"all", t:"全部"},
+    {v:"month", t:"月"}, {v:"week", t:"周"}, {v:"year", t:"年"}, {v:"all", t:"全部"},
     {v:"custom", t:"自定义", hidden: !_scopeHasCustom},
   ], curScopeVal);
 }
@@ -126,6 +126,31 @@ function syncScopeChips(){   // 取值控件显隐（不触发重载）
   $("#monthSel").style.display = sc==="month" ? "" : "none";
   $("#yearSel").style.display = sc==="year" ? "" : "none";
   $("#sc_dates").style.display = sc==="custom" ? "flex" : "none";
+  $("#sc_week").style.display = sc==="week" ? "flex" : "none";
+  if(sc==="week") weekRenderLabel();
+}
+/* ===== 按周统计（周一 ~ 周日；‹›翻周） ===== */
+let curWeekStart = null;   // 当前周锚（周一 ISO）；null=默认本周
+const _isoLocal = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+function weekStartOf(iso){   // 所在周的周一（周一为一周之始）
+  const d = new Date(iso + "T00:00:00");
+  const wd = d.getDay() || 7;   // 周日 getDay()=0 → 视作 7
+  d.setDate(d.getDate() - wd + 1);
+  return _isoLocal(d);
+}
+function weekShift(start, n){
+  const d = new Date(start + "T00:00:00");
+  d.setDate(d.getDate() + n * 7);
+  return _isoLocal(d);
+}
+function weekNav(n){
+  if(!curWeekStart) curWeekStart = weekStartOf(today());
+  curWeekStart = weekShift(curWeekStart, n);
+  onTimeChange();
+}
+function weekRenderLabel(){
+  const ws = curWeekStart || weekStartOf(today());
+  $("#week_label").textContent = `${ws.slice(5)} ~ ${weekShift(ws, 6).slice(5)}`;
 }
 function setScope(v){
   $("#appScope").value = SC_LABEL[v] || v;
@@ -150,6 +175,11 @@ function curStatRange(){
   const sc = appScope();
   if(sc === "all") return {from:"2000-01-01", to:"2100-01-01", label:"全部"};
   if(sc === "custom") return {from:dtGet($("#sc_from"))||"2000-01-01", to:dtGet($("#sc_to"))||"2100-01-01", label:"自定义区间"};
+  if(sc === "week"){
+    const ws = curWeekStart || weekStartOf(today());
+    // to 为排他上界（下周一 00:00），与月/年口径一致
+    return {from:ws, to:weekShift(ws, 7), label:`${ws} ~ ${weekShift(ws, 6)}`};
+  }
   if(sc === "year"){
     const y = dtGet($("#yearSel")) || new Date().getFullYear();
     return {from:`${y}-01-01`, to:`${+y+1}-01-01`, label:`${y}年`};
@@ -258,8 +288,8 @@ async function refreshStats(){
       api(`/api/stats/category-range?${q}&type=income`),
       sc==="year"
         ? api(`/api/stats/monthly?ledger=${lid()}&year=${statRange.label.replace("年","")}`)
-        : sc==="custom"
-          ? api(`/api/stats/trend?${q}`)
+        : (sc==="custom" || sc==="week")
+          ? api(`/api/stats/trend?${q}`)   // 周：区间内日趋势（7 天），与自定义同口径
           : api(`/api/stats/yearly?ledger=${lid()}`)]);
     trendIsYearly = sc === "all";
   }
