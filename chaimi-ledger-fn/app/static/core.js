@@ -229,6 +229,7 @@ function showPage(p){
   if(_navSkip) _navSkip = false;                                  // popstate 恢复调用：历史已 pop，不再 push
   else if(document.body.dataset.page !== p){ _navStack.push(p); history.pushState({chaimiNav:p}, ""); }   // 用户切换：双栈同步 push
   document.body.dataset.page = p;
+  try{ localStorage.setItem("chaimi_page", p); }catch(_){}   // 持久化页签：刷新后恢复（不再回落 AI 首页）
   document.querySelectorAll(".page").forEach(x=>x.classList.toggle("on", x.id==="tab-"+p));
   moveScopeBar(p);
   document.querySelectorAll(".sidebar .nav-item[data-p]").forEach(b=>b.classList.toggle("on", b.dataset.p===p));
@@ -268,11 +269,17 @@ async function loadAll(selectId){
   dtSet($("#monthSel"), thisMonth());
   await fillYearSel();
   syncScopeChips();
-  document.body.dataset.page = document.body.dataset.page || "ai";   // 初始默认 AI 页，供 body[data-page] 样式与顶栏渲染判断
-
-  _navStack.push(document.body.dataset.page);
-  history.pushState({chaimiNav: document.body.dataset.page}, "");
-  moveScopeBar(document.body.dataset.page);
+  // 恢复上次停留的页签（localStorage 持久化；刷新后不再回落 AI 首页）。
+  // showPage 负责切页/高亮/推入历史初始帧/触发对应页数据加载（本函数尾部不再手推）
+  let savedPage = "ai";
+  try{ savedPage = localStorage.getItem("chaimi_page") || "ai"; }catch(_){}
+  if(!document.querySelector(`.sidebar .nav-item[data-p="${savedPage}"]`)) savedPage = "ai";
+  document.body.dataset.page = "ai";   // 复位为标记初值：让 showPage 正常走切换分支（含历史帧推入）
+  showPage(savedPage);
+  if(!_navStack.length){   // 恢复到 AI 页时 showPage 跳过了推帧：补上返回键守卫依赖的初始帧
+    _navStack.push(document.body.dataset.page);
+    history.pushState({chaimiNav: document.body.dataset.page}, "");
+  }
 }
 async function loadCats(){
   categories = await api(`/api/categories?ledger=${lid()}`);
