@@ -273,7 +273,7 @@ async function refreshStats(){
   const sc = appScope();
   const m = dtGet($("#monthSel")) || thisMonth();
   statRange = curStatRange();
-  // 趋势图标题随范围：周→周度趋势（近 12 周）、月/年→月度趋势、全部→年度趋势、自定义→日趋势
+  // 趋势图标题随范围：周→周度趋势（近 4 周）、月/年→月度趋势、全部→年度趋势、自定义→日趋势
   $("#trendTitle").textContent = (sc==="week" ? "周度趋势" : sc==="all" ? "年度趋势"
     : sc==="custom" ? "日趋势" : "月度趋势") + "（支出 / 收入）";
   let s, cats, catsInc, trend, trendIsYearly = false;
@@ -288,7 +288,7 @@ async function refreshStats(){
     const q = `ledger=${lid()}&from=${statRange.from}&to=${encodeURIComponent(rangeDto(statRange))}`;
     // 周范围趋势拉近 12 周的按日数据（所选周为最后一周），下方聚合到周
     const trendQ = sc==="week"
-      ? `ledger=${lid()}&from=${weekShift(statRange.from, -77)}&to=${encodeURIComponent(weekShift(statRange.from, 7))}&span=day`
+      ? `ledger=${lid()}&from=${weekShift(statRange.from, -21)}&to=${encodeURIComponent(weekShift(statRange.from, 7))}&span=day`
       : null;
     [s, cats, catsInc, trend] = await Promise.all([
       api(`/api/stats/range?${q}`),
@@ -312,8 +312,8 @@ async function refreshStats(){
       const b = byWeek[k] || (byWeek[k] = {net:0, income:0});
       b.net += t.net; b.income += t.income;
     });
-    trend = Array.from({length:12}, (_,i) => {
-      const w = weekShift(sel, (i - 11) * 7);
+    trend = Array.from({length:4}, (_,i) => {
+      const w = weekShift(sel, (i - 3) * 7);
       const b = byWeek[w] || {net:0, income:0};
       return {day:w, net:b.net, income:b.income};
     });
