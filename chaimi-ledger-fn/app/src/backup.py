@@ -22,7 +22,7 @@ import urllib.request
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import config
 import db
@@ -171,6 +171,8 @@ def _webdav_cfg() -> dict:
 def _dav_url(cfg: dict, *parts: str) -> str:
     base = (cfg.get("url") or "").rstrip("/")
     seg = "/".join(p.strip("/") for p in parts if p)
+    # 中文目录名等非 ASCII 字符必须 percent-encode（urllib 不接受原始中文 URL）
+    seg = quote(seg, safe="/") if seg else seg
     return f"{base}/{seg}" if seg else base
 
 def _dav_open(method: str, url: str, cfg: dict, data: bytes | None = None,
