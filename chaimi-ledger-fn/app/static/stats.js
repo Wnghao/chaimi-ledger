@@ -273,8 +273,8 @@ async function refreshStats(){
   const sc = appScope();
   const m = dtGet($("#monthSel")) || thisMonth();
   statRange = curStatRange();
-  // 趋势图标题随范围：周→按日、月/年→按月、全部→按年、自定义→按日
-  $("#trendTitle").textContent = (sc==="week" ? "日趋势" : sc==="all" ? "年度趋势"
+  // 趋势图标题随范围：周→周度趋势（近 12 周）、月/年→月度趋势、全部→年度趋势、自定义→日趋势
+  $("#trendTitle").textContent = (sc==="week" ? "周度趋势" : sc==="all" ? "年度趋势"
     : sc==="custom" ? "日趋势" : "月度趋势") + "（支出 / 收入）";
   let s, cats, catsInc, trend, trendIsYearly = false;
   if(sc === "month"){
@@ -286,16 +286,37 @@ async function refreshStats(){
   }else{
     // 自定义区间末端含当天（与流水页同口径：补 23:59:59，后端按 date< 排他）
     const q = `ledger=${lid()}&from=${statRange.from}&to=${encodeURIComponent(rangeDto(statRange))}`;
+    // 周范围趋势拉近 12 周的按日数据（所选周为最后一周），下方聚合到周
+    const trendQ = sc==="week"
+      ? `ledger=${lid()}&from=${weekShift(statRange.from, -77)}&to=${encodeURIComponent(weekShift(statRange.from, 7))}&span=day`
+      : null;
     [s, cats, catsInc, trend] = await Promise.all([
       api(`/api/stats/range?${q}`),
       api(`/api/stats/category-range?${q}`),
       api(`/api/stats/category-range?${q}&type=income`),
       sc==="year"
         ? api(`/api/stats/monthly?ledger=${lid()}&year=${statRange.label.replace("年","")}`)
-        : (sc==="custom" || sc==="week")
-          ? api(`/api/stats/trend?${q}${sc==="week" ? "&span=day" : ""}`)   // 周：按日分桶
-          : api(`/api/stats/yearly?ledger=${lid()}`)]);
+        : (sc==="custom")
+          ? api(`/api/stats/trend?${q}`)
+          : sc==="week"
+            ? api(`/api/stats/trend?${trendQ}`)
+            : api(`/api/stats/yearly?ledger=${lid()}`)]);
     trendIsYearly = sc === "all";
+  }
+  if(sc === "week"){
+    // 按日桶 → 聚合到周（周一锚）：12 根周柱，与月/年视角的 12 根对齐
+    const sel = statRange.from;
+    const byWeek = {};
+    (trend || []).forEach(t => {
+      const k = weekStartOf(t.day);
+      const b = byWeek[k] || (byWeek[k] = {net:0, income:0});
+      b.net += t.net; b.income += t.income;
+    });
+    trend = Array.from({length:12}, (_,i) => {
+      const w = weekShift(sel, (i - 11) * 7);
+      const b = byWeek[w] || {net:0, income:0};
+      return {day:w, net:b.net, income:b.income};
+    });
   }
   // 图例与切片统一按金额(净额)从高到低排列
   cats.sort((a,b)=>b.net-a.net);
@@ -411,12 +432,12 @@ async function refreshStats(){
             showTxDetail(`${yv}年 ${el.datasetIndex===1?"收入":"支出"}明细`,
               {from:`${yv}-01-01`, to:`${+yv+1}-01-01`, toExclusive:true, type: el.datasetIndex===1?"income":"expense"}); });
       }else if(sc === "week"){
-        // 周度趋势（按日 7 根柱）：下钻当日明细
+        // 周度趋势（近 12 周，每周一根柱）：下钻该周明细
         await drawChart("trendChart","bar", trend.map(t=>t.day.slice(5)),
           trend.map(t=>t.net/100), trend.map(t=>t.income/100),
-          (e, els)=>{ const el = els[0]; const d = trend[el.index].day;
-            showTxDetail(`${d} ${el.datasetIndex===1?"收入":"支出"}明细`,
-              {from:d, to:weekShift(d,1), toExclusive:true, type: el.datasetIndex===1?"income":"expense"}); });
+          (e, els)=>{ const el = els[0]; const w = trend[el.index].day;
+            showTxDetail(`${w} 那一周 ${el.datasetIndex===1?"收入":"支出"}明细`,
+              {from:w, to:weekShift(w,7), toExclusive:true, type: el.datasetIndex===1?"income":"expense"}); });
       }else{
         // 月度趋势（按月/按年/自定义区间共用）：下钻用数据自身的月份，兼容自定义跨年区间
         await drawChart("trendChart","bar", trend.map(t=>t.month.slice(5)+"月"),
