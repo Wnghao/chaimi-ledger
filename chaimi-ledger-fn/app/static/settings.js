@@ -117,22 +117,29 @@ async function loadCatMgr(){
   for(const m of maps) (byCat[m.category_id] = byCat[m.category_id] || []).push(m);
   const btn = $("#catEditBtn");
   if(btn) btn.textContent = catEdit ? "完成" : "编辑";
+  // 任意层级树：DFS 渲染，缩进 + └ 前缀；每个节点可建子分类（分类管理编辑态）
+  const kids = {};
+  for(const c of cats) (kids[c.parent_id || 0] = kids[c.parent_id || 0] || []).push(c);
+  const renderNode = (c, depth, path) => {
+    const fullName = path ? path + " / " + c.name : c.name;
+    const ind = depth ? "　".repeat(depth - 1) + "└ " : "";
+    const chips = (byCat[c.id]||[]).map(m=>
+      `<span class="mchip" title="账单来源名">${esc(m.source)}${catEdit?`<b onclick="event.stopPropagation();catMgrAliasDel(${m.id})">×</b>`:""}</span>`).join("");
+    return `<div class="cm-cat" style="padding-left:${depth * 14}px">
+      <div class="cm-cname${catEdit?" edit":""}"${catEdit?` onclick="catMgrRename(${c.id})" title="点此改名（${esc(fullName)}）"`:` title="${esc(fullName)}"`}>${ind}${esc(c.name)}</div>
+      <div class="cm-chips">${chips}
+        ${catEdit?`<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="catMgrAliasAdd(${c.id})">＋来源</button>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="catMgrNew('${c.type}', ${c.id}, '${qEsc(fullName)}')">＋子分类</button>`:""}
+      </div>
+      ${catEdit?`<button class="btn danger" style="padding:2px 10px;font-size:11px;flex:0 0 auto" onclick="catMgrDel(${c.id},'${qEsc(c.name)}')">删除</button>`:""}
+    </div>` + (kids[c.id] || []).map(k => renderNode(k, depth + 1, fullName)).join("");
+  };
   $("#catMgr").innerHTML = ["expense","income","transfer"].map(g=>{
-    const tops = cats.filter(c=>!c.parent_id && c.type===g);
+    const tops = (kids[0] || []).filter(c=>c.type===g);
     if(!tops.length) return "";
     return `<div class="cm-group"><div class="cm-gtitle">${CAT_GROUP_CN[g]}
         <button class="btn btn-ghost" style="padding:2px 10px;font-size:11px;margin-left:6px" onclick="catMgrNew('${g}')">＋新建分类</button></div>`
-      + tops.map(c=>{
-        const chips = (byCat[c.id]||[]).map(m=>
-          `<span class="mchip" title="账单来源名">${esc(m.source)}${catEdit?`<b onclick="event.stopPropagation();catMgrAliasDel(${m.id})">×</b>`:""}</span>`).join("");
-        return `<div class="cm-cat">
-          <div class="cm-cname${catEdit?" edit":""}"${catEdit?` onclick="catMgrRename(${c.id})" title="点此改名"`:""}>${esc(c.name)}</div>
-          <div class="cm-chips">${chips}
-            ${catEdit?`<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="catMgrAliasAdd(${c.id})">＋来源</button>`:""}
-          </div>
-          ${catEdit?`<button class="btn danger" style="padding:2px 10px;font-size:11px;flex:0 0 auto" onclick="catMgrDel(${c.id},'${qEsc(c.name)}')">删除</button>`:""}
-        </div>`;
-      }).join("") + `</div>`;
+      + tops.map(c=>renderNode(c, 0, "")).join("") + `</div>`;
   }).join("") || '<div class="sub">暂无分类</div>';
 }
 async function catMgrRename(id){
@@ -162,9 +169,12 @@ async function catMgrAliasDel(id){
 }
 
 let catNewType = "expense";
-function catMgrNew(type){
+let catNewParent = null;   // null=新建一级；数字=在指定父分类下建子分类
+function catMgrNew(type, parentId, parentName){
   catNewType = type;
-  $("#catNewTitle").textContent = `新建${CAT_GROUP_CN[type]||""}分类`;
+  catNewParent = parentId || null;
+  $("#catNewTitle").textContent = parentId
+    ? `新建「${parentName}」的子分类` : `新建${CAT_GROUP_CN[type]||""}分类`;
   $("#catNewName").value = ""; $("#catNewSources").value = "";
   $("#catNewMask").style.display = "flex";
   setTimeout(()=>$("#catNewName").focus(), 50);
@@ -174,7 +184,9 @@ async function catNewSubmit(){
   const name = $("#catNewName").value.trim();
   if(!name) return msg("请填写分类名", false);
   try{
-    const r = await apiSend(`/api/categories?ledger=${lid()}`, "POST", {name, type: catNewType});
+    const body = {name, type: catNewType};
+    if(catNewParent) body.parent_id = catNewParent;   // 子分类：挂在指定父分类下
+    const r = await apiSend(`/api/categories?ledger=${lid()}`, "POST", body);
     // 来源名逐个挂到新分类（同来源已挂别处自动改挂）；不计收支组按支出侧落行，解析端不分侧命中
     const srcs = [...new Set($("#catNewSources").value.split(/[，,、;；\s]+/).map(s=>s.trim()).filter(Boolean))];
     for(const s of srcs){
@@ -185,7 +197,7 @@ async function catNewSubmit(){
   catNewClose(); await loadCatMgr(); msg("分类已创建 ✅");
 }
 async function catMgrDel(id, name){
-  if(!await uiConfirm(`删除分类「${name}」：其历史流水将变为未分类并进待确认，包含的来源名一并移除。确定？`, "删除")) return;
+  if(!await uiConfirm(`删除分类「${name}」：其全部子分类一并删除，相关历史流水将变为未分类并进待确认，包含的来源名一并移除。确定？`, "删除")) return;
   await api(`/api/categories/${id}`, {method:"DELETE"});
   await loadCatMgr();
   loadTx(); loadPendingBadge();   // 受影响流水进待确认，列表与徽标同步刷新
@@ -574,9 +586,7 @@ async function loadRecur(){
 }
 
 function recurFillSelects(){
-  $("#rc_cat").innerHTML = categories
-    .filter(c => !c.parent_id)
-    .map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("#rc_cat").innerHTML = catTreeOptions($("#rc_type").value, null);
   $("#rc_acc").innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
   $("#rc_to").innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
 }
@@ -589,6 +599,7 @@ function recurOnType(){
   const t = $("#rc_type").value;
   $("#rc_cat_wrap").style.display = t === "transfer" ? "none" : "";
   $("#rc_to_wrap").style.display = t === "transfer" ? "" : "none";
+  if(t !== "transfer") $("#rc_cat").innerHTML = catTreeOptions(t, null);   // 类型切换重建分类树
 }
 function recurOpen(){
   recurEditId = null;

@@ -171,6 +171,12 @@ INCOME_CATEGORIES = [
     "人情往来", "报销", "投资本金", "其他收入",
 ]
 
+# 多级种子（2026-10-29，任意层级分类的第一批）：{类型: {一级名: {二级名: [三级名...]}}}
+# 只在此声明要预置的子树，未声明的一级分类不带子级；seed_ledger_defaults 消费
+SUBCATEGORY_SEEDS = {
+    "expense": {"餐饮美食": {"三餐": ["早餐", "午餐", "晚餐"]}},
+}
+
 # 不计收支组一级分类（前端分组展示名「退款和不计收支」）：
 # 「退款」=冲减类（关联原消费后抵扣那笔支出，归因原消费日/分类；未关联前暂不计）；
 # 「不计收支」=位移类（内部转账/理财/还款，统计完全消失，子类明细存 tags.transfer_sub）。
@@ -214,7 +220,7 @@ DEFAULT_MAPPINGS = [
     # 钱迹（qianji 模板）：钱迹自带分类与账内不通，默认映射按其实际分类清单补齐，
     # 避免历史账导入时大面积落「其他」待确认；余额宝/理财赎回等收支性质不明的
     # 来源刻意不映射，留待确认由用户裁决
-    ("expense", "三餐", "餐饮美食"), ("expense", "零食", "餐饮美食"),
+    ("expense", "三餐", "三餐"), ("expense", "零食", "餐饮美食"),
     ("expense", "日用品", "日用百货"), ("expense", "家居家装", "日用百货"),
     ("expense", "交通", "交通出行"),
     ("expense", "话费网费", "充值缴费"), ("expense", "水电煤", "充值缴费"),
@@ -310,10 +316,113 @@ def top_cat_id(conn: sqlite3.Connection, ledger_id: int, name: str,
     r = conn.execute(sql, args).fetchone()
     return r["id"] if r else None
 
+def seed_default_mappings(conn: sqlite3.Connection, ledger_id: int) -> None:
+    """给账本种默认映射（v6 起映射为账本级 + 外键，新账本必须显式种）。
+    目标按 DEFAULT_MAPPINGS 里的分类名 + flow_type 解析到本账本分类 id——
+    2026-10-29 起任意层级都可被指向（如「三餐」指向二级节点），同名多处取 sort,id 首个。"""
+    for flow, source, target in DEFAULT_MAPPINGS:
+        cid = cat_id_by_name(conn, ledger_id, target, flow)
+        if cid:
+            conn.execute(
+                "INSERT OR IGNORE INTO category_mappings(ledger_id, flow_type, source, category_id) "
+                "VALUES(?,?,?,?)", (ledger_id, flow, source, cid))
+
+def top_cat_by_id(conn: sqlite3.Connection, ledger_id: int, cid: int) -> int | None:
+    """按 id 取属于该账本的一级分类 id；不属于/非一级/不存在返回 None（server 映射校验用）。"""
+    r = conn.execute(
+        "SELECT id FROM categories WHERE id=? AND parent_id IS NULL AND ledger_id=?",
+        (cid, ledger_id)).fetchone()
+    return r["id"] if r else None
+
+# ---------- 任意层级分类（2026-10-29：parent 链不再限两层，每层都可被选为流水分类） ----------
+
+MAX_CAT_DEPTH = 8   # 层级上限（防误建环/失控；正常使用远用不到这么深）
+
+def cat_all(conn: sqlite3.Connection, ledger_id: int) -> list[sqlite3.Row]:
+    """账本全部分类（扁平，含 parent_id）——层级工具的统一取数口。"""
+    return conn.execute(
+        "SELECT * FROM categories WHERE ledger_id=? ORDER BY sort, id", (ledger_id,)).fetchall()
+
+def cat_children_map(rows) -> dict:
+    """parent_id → [行]（根的键为 None）。"""
+    m: dict = {}
+    for r in rows:
+        m.setdefault(r["parent_id"], []).append(r)
+    return m
+
+def cat_root_map(rows) -> dict[int, int]:
+    """id → 根分类 id（沿 parent 链上溯到顶；环/断链防御：超 MAX_CAT_DEPTH 层强制截断，自己当根）。"""
+    by_id = {r["id"]: r for r in rows}
+    out: dict[int, int] = {}
+    for r in rows:
+        cur, n = r, 0
+        while cur["parent_id"] and cur["parent_id"] in by_id and n < MAX_CAT_DEPTH:
+            cur = by_id[cur["parent_id"]]
+            n += 1
+        out[r["id"]] = cur["id"]
+    return out
+
+def cat_descendants(rows, cid: int) -> set[int]:
+    """cid 及其全部子孙 id（含自身）——分类下钻/级联删除共用。"""
+    kids = cat_children_map(rows)
+    out, stack = set(), [cid]
+    while stack:
+        cur = stack.pop()
+        if cur in out:
+            continue   # 环防御
+        out.add(cur)
+        stack.extend(c["id"] for c in kids.get(cur, []))
+    return out
+
+def cat_path(rows, cid: int) -> str:
+    """分类全路径（"餐饮美食 / 三餐 / 晚餐"）——展示/导出用；未知 id 返回空串。"""
+    by_id = {r["id"]: r for r in rows}
+    parts, cur, n = [], by_id.get(cid), 0
+    while cur and n < MAX_CAT_DEPTH:
+        parts.append(cur["name"])
+        cur = by_id.get(cur["parent_id"]) if cur["parent_id"] else None
+        n += 1
+    return " / ".join(reversed(parts))
+
+def cat_valid_parent(conn: sqlite3.Connection, ledger_id: int, parent_id: int | None,
+                     ctype: str, name: str, exclude_id: int | None = None) -> None:
+    """新建/改父级时的层级校验（不合法抛 ValueError）：
+    父分类存在且同账本、类型一致、深度不超上限、同父下不重名。"""
+    if parent_id is None:
+        return
+    rows = cat_all(conn, ledger_id)
+    by_id = {r["id"]: r for r in rows}
+    p = by_id.get(parent_id)
+    if not p:
+        raise ValueError("父分类不存在或不属于当前账本")
+    if p["type"] != ctype:
+        raise ValueError("子分类类型须与父分类一致")
+    n, cur = 1, p
+    while cur["parent_id"] and cur["parent_id"] in by_id and n < MAX_CAT_DEPTH:
+        cur = by_id[cur["parent_id"]]
+        n += 1
+    if n >= MAX_CAT_DEPTH:
+        raise ValueError(f"层级最深 {MAX_CAT_DEPTH} 级")
+    dup = [r for r in rows if r["parent_id"] == parent_id and r["name"] == name
+           and r["id"] != exclude_id]
+    if dup:
+        raise ValueError("同级下已存在同名分类")
+
+def cat_id_by_name(conn: sqlite3.Connection, ledger_id: int, name: str,
+                   flow_type: str = "") -> int | None:
+    """按名字取分类 id（任意层级，任意层都可被映射指向）；flow_type 非空按类型消歧。
+    同名多处时按 sort,id 取第一个（种子可控名字不重）。"""
+    sql = ("SELECT id FROM categories WHERE ledger_id=? AND name=?"
+           + (" AND type=?" if flow_type else "") + " ORDER BY sort, id LIMIT 1")
+    args = (ledger_id, name) + ((flow_type,) if flow_type else ())
+    r = conn.execute(sql, args).fetchone()
+    return r["id"] if r else None
+
 def seed_ledger_defaults(conn: sqlite3.Connection, ledger_id: int, accounts: bool = True) -> None:
     """给账本播种默认分类（存在即跳过，只增不删，不动用户自建）+ 默认账户。
     新建账本（seed / server.create_ledger）与历史迁移（v2/v4/v8/v9）共用；
-    迁移场景传 accounts=False 不动账户。"""
+    迁移场景传 accounts=False 不动账户。
+    2026-10-29 起支持多级种子（SUBCATEGORY_SEEDS），父链存在即跳过，与一级同口径。"""
     for kind, table in (("expense", EXPENSE_CATEGORIES), ("income", INCOME_CATEGORIES),
                         ("transfer", TRANSFER_CATEGORIES)):
         for sort, parent in enumerate(table):
@@ -325,28 +434,38 @@ def seed_ledger_defaults(conn: sqlite3.Connection, ledger_id: int, accounts: boo
             conn.execute(
                 "INSERT INTO categories(ledger_id, type, name, parent_id, sort) VALUES(?,?,?,?,?)",
                 (ledger_id, kind, parent, None, sort))
+    # 多级种子：{类型: {一级名: {二级名: [三级名...]}}}（存在即跳过；父缺失则连父一起建）
+    subs = SUBCATEGORY_SEEDS.get("expense", {})
+    for top, children in subs.items():
+        t = conn.execute(
+            "SELECT id FROM categories WHERE ledger_id=? AND type='expense' AND name=? AND parent_id IS NULL",
+            (ledger_id, top)).fetchone()
+        if not t:
+            continue
+        top_id = t["id"]
+        for cname, gchildren in children.items():
+            row = conn.execute(
+                "SELECT id FROM categories WHERE ledger_id=? AND type='expense' AND name=? AND parent_id=?",
+                (ledger_id, cname, top_id)).fetchone()
+            if row:
+                child_id = row["id"]
+            else:
+                child_id = conn.execute(
+                    "INSERT INTO categories(ledger_id, type, name, parent_id, sort) "
+                    "VALUES(?, 'expense', ?, ?, 0)", (ledger_id, cname, top_id)).lastrowid
+            for gi, gname in enumerate(gchildren):
+                g = conn.execute(
+                    "SELECT id FROM categories WHERE ledger_id=? AND type='expense' AND name=? AND parent_id=?",
+                    (ledger_id, gname, child_id)).fetchone()
+                if not g:
+                    conn.execute(
+                        "INSERT INTO categories(ledger_id, type, name, parent_id, sort) "
+                        "VALUES(?, 'expense', ?, ?, ?)", (ledger_id, gname, child_id, gi))
     if accounts:
         for i, name in enumerate(DEFAULT_ACCOUNTS):
             conn.execute(
                 "INSERT INTO accounts(ledger_id, name, type, sort) VALUES(?,?,?,?)",
                 (ledger_id, name, "e-wallet" if name != "现金" else "cash", i))
-
-def top_cat_by_id(conn: sqlite3.Connection, ledger_id: int, cid: int) -> int | None:
-    """按 id 取属于该账本的一级分类 id；不属于/非一级/不存在返回 None（server 映射校验用）。"""
-    r = conn.execute(
-        "SELECT id FROM categories WHERE id=? AND parent_id IS NULL AND ledger_id=?",
-        (cid, ledger_id)).fetchone()
-    return r["id"] if r else None
-
-def seed_default_mappings(conn: sqlite3.Connection, ledger_id: int) -> None:
-    """给账本种默认映射（v6 起映射为账本级 + 外键，新账本必须显式种）。
-    目标按 DEFAULT_MAPPINGS 里的分类名 + flow_type 解析到本账本的一级分类 id。"""
-    for flow, source, target in DEFAULT_MAPPINGS:
-        cid = top_cat_id(conn, ledger_id, target, flow)
-        if cid:
-            conn.execute(
-                "INSERT OR IGNORE INTO category_mappings(ledger_id, flow_type, source, category_id) "
-                "VALUES(?,?,?,?)", (ledger_id, flow, source, cid))
 
 def seed() -> None:
     """首次初始化：默认账本 + 支出/收入分类 + 全局映射 + 默认账户。"""
@@ -430,7 +549,9 @@ def stats_category(conn: sqlite3.Connection, ledger_id: int, month: str, flow_ty
 
 def stats_category_range(conn: sqlite3.Connection, ledger_id: int, dfrom: str, dto: str,
                          flow_type: str = "expense") -> list[dict]:
-    """分类聚合（饼图数据源）。expense 按净额。"""
+    """分类聚合（饼图数据源）。expense 按净额。
+    2026-10-29 起分类支持任意层级：聚合统一按根分类（沿 parent 链上溯），
+    饼图口径不变（一级视图）；下钻用 /api/transactions?category=（已支持子孙含查询）。"""
     rows = conn.execute(
         """SELECT c.id, c.name, COALESCE(c2.name,'') AS parent,
               SUM(t.amount) AS gross
@@ -446,10 +567,13 @@ def stats_category_range(conn: sqlite3.Connection, ledger_id: int, dfrom: str, d
             refund = _refund_sum(conn, ledger_id, dfrom, dto, r["id"])
         out.append({"id": r["id"], "name": r["name"], "parent": r["parent"],
                     "gross": r["gross"], "net": r["gross"] - refund})
-    # 一级汇总视图（饼图用）：二级挂到其一级
-    top = {}
+    # 根分类汇总视图（饼图用）：任意深度节点挂到其根（parent 链上溯，非单层）
+    cat_rows = cat_all(conn, ledger_id)
+    roots = cat_root_map(cat_rows)
+    names = {r["id"]: r["name"] for r in cat_rows}
+    top: dict[str, dict] = {}
     for r in out:
-        key = r["parent"] or r["name"]
+        key = names.get(roots.get(r["id"]), r["parent"] or r["name"])
         top.setdefault(key, {"name": key, "gross": 0, "net": 0})
         top[key]["gross"] += r["gross"]
         top[key]["net"] += r["net"]

@@ -566,6 +566,27 @@ def _account_name(conn: sqlite3.Connection, acc_id: int | None) -> str:
     r = conn.execute("SELECT name FROM accounts WHERE id=?", (acc_id,)).fetchone()
     return r["name"] if r else ""
 
+def _apply_sub_category(cat_rows, p: dict, sub_name: str) -> None:
+    """分类落定后沿子分类列下挂（钱迹「二级分类」等）：在已选分类的子树里找同名
+    后代节点（BFS，浅层优先），找到即重挂；无同名节点保持原分类不动。
+    覆盖两种落点：分类列直接映射到中间层（三餐→晚餐）、关键词命中根类
+    （晚餐→餐饮美食→子树里的 三餐/晚餐）。"""
+    if not sub_name or not p.get("category_id"):
+        return
+    kids = dbm.cat_children_map(cat_rows)
+    queue, seen = [p["category_id"]], set()
+    while queue:
+        cur = queue.pop(0)
+        if cur in seen:
+            continue
+        seen.add(cur)
+        for node in kids.get(cur, []):
+            if node["name"] == sub_name:
+                p["category_id"] = node["id"]
+                p["category_name"] = node["name"]
+                return
+            queue.append(node["id"])
+
 def build_previews(conn: sqlite3.Connection, ledger_id: int, flows: list[RawFlow]) -> list[dict]:
     """RawFlow → FlowPreview（含分类解析/去重/退款匹配预填，7.5/7.8）。
     1.0.1 起**纯只读**：旧版在这里随解析静默执行 _purge_bad_learned_mappings +
@@ -576,6 +597,8 @@ def build_previews(conn: sqlite3.Connection, ledger_id: int, flows: list[RawFlow
     existing = snap.by_hash
     # 分类瀑布上下文（一级分类索引 + transfer 专用分类；见 import_classify）
     ctx = ClassifyCtx(conn, ledger_id)
+    # 任意层级分类扁平表（子分类列下挂 _apply_sub_category 用）
+    cat_rows = dbm.cat_all(conn, ledger_id)
 
     previews = []
     for f in flows:
@@ -616,6 +639,8 @@ def build_previews(conn: sqlite3.Connection, ledger_id: int, flows: list[RawFlow
                               else flows[-f["export_refund_idx"] - 1]["amount"])
         else:
             classify_flow(f, ctx, p)
+        # 子分类列（钱迹二级分类等）：分类落定后沿同名子节点下挂
+        _apply_sub_category(cat_rows, p, f.get("sub_category") or "")
         if f.get("bracket_refund") is not None:
             p["bracket_refund"] = f["bracket_refund"]
             p["tags"]["bracket_refund"] = f["bracket_refund"]   # 持久化，跨批括号匹配用

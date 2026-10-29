@@ -151,7 +151,10 @@ PLATFORM_TEMPLATES = [
         "col": {"date": "时间", "type": "分类", "name": "备注", "note": "备注",
                 "flow": "类型", "amount": "金额",
                 "pay": "账户1", "to_account_name": "账户2",
-                "order": "ID", "export_id": "ID", "export_ref": "关联账单"},
+                "order": "ID", "export_id": "ID", "export_ref": "关联账单",
+                # 二级分类（早餐/午餐/晚餐等）：build_previews 分类落定后沿此列下挂
+                # 到已选分类的同名子节点（任意层级；无同名子节点保持原分类不动）
+                "sub_category": "二级分类"},
         "flow_map": {"支出": "expense", "收入": "income"},
         # 钱迹退款记账为「分类以 -退款 结尾的收入行」（微信红包-退款/京东商城平台商户-退款
         # 等）——命中即整行转退款（不计收支，等通用退款匹配关联原消费）

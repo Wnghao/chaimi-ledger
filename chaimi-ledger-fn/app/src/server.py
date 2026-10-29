@@ -317,10 +317,14 @@ class CategoryIn(BaseModel):
 
 @app.post("/api/categories")
 def create_category(ledger: int, body: CategoryIn):
+    try:
+        dbm.cat_valid_parent(conn(), ledger, body.parent_id, body.type, body.name.strip())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     with conn() as c:
         cur = c.execute(
             "INSERT INTO categories(ledger_id, type, name, parent_id, icon) VALUES(?,?,?,?,?)",
-            (ledger, body.type, body.name, body.parent_id, body.icon))
+            (ledger, body.type, body.name.strip(), body.parent_id, body.icon))
     return {"id": cur.lastrowid}
 
 @app.put("/api/categories/{cid}")
@@ -333,15 +337,21 @@ def update_category(cid: int, body: CategoryIn):
 @app.delete("/api/categories/{cid}")
 def delete_category(cid: int):
     """删分类必须回炉关联流水（无分类的行因 INNER JOIN 不进任何列表，只能从
-    待确认队列重新归类）——但留审计日志，静默大面积改数据必须可追溯。"""
+    待确认队列重新归类）——但留审计日志，静默大面积改数据必须可追溯。
+    2026-10-29 起支持任意层级：子孙整棵子树一起删，流水全部打回待确认。"""
+    cat = conn().execute("SELECT ledger_id FROM categories WHERE id=?", (cid,)).fetchone()
+    if not cat:
+        raise HTTPException(404, "分类不存在")
+    rows = dbm.cat_all(conn(), cat["ledger_id"])
+    subtree = dbm.cat_descendants(rows, cid)
+    ph = ",".join("?" * len(subtree))
     with conn() as c:
-        n = c.execute("UPDATE transactions SET category_id=NULL, need_confirm=1 WHERE category_id=?",
-                      (cid,)).rowcount
-        c.execute("DELETE FROM category_mappings WHERE category_id=?", (cid,))
-        c.execute("DELETE FROM categories WHERE parent_id=?", (cid,))
-        c.execute("DELETE FROM categories WHERE id=?", (cid,))
+        n = c.execute(f"UPDATE transactions SET category_id=NULL, need_confirm=1 "
+                      f"WHERE category_id IN ({ph})", (*subtree,)).rowcount
+        c.execute(f"DELETE FROM category_mappings WHERE category_id IN ({ph})", (*subtree,))
+        c.execute(f"DELETE FROM categories WHERE id IN ({ph})", (*subtree,))
     if n:
-        log.info(f"删除分类 #{cid}：{n} 笔流水置空分类并进入待确认（重新归类入口）")
+        log.info(f"删除分类 #{cid}（含子孙 {len(subtree)} 个节点）：{n} 笔流水置空分类并进入待确认（重新归类入口）")
     _bump_rev()
     return {"ok": True, "affected": n}
 
@@ -603,10 +613,13 @@ def list_transactions(ledger: int, _from: str = Query("", alias="from"), to: str
             args.append(type)
     if category:
         # （退款行 type=transfer 且 category_id 常不落本分类，不连带取会丢失退款双卡片）
-        cat_sql = "SELECT id FROM categories WHERE ledger_id=? AND (id=? OR parent_id=?)"
-        sql.append(f"AND (t.category_id IN ({cat_sql}) "
-                   f"OR t.refund_for IN (SELECT id FROM transactions WHERE ledger_id=? AND category_id IN ({cat_sql})))")
-        args += [ledger, category, category, ledger, ledger, category, category]
+        # 分类下钻含全部子孙（任意层级）：子孙集合 Python 算好占位注入（表小，开销可忽略）
+        cat_rows = dbm.cat_all(conn(), ledger)
+        ids = dbm.cat_descendants(cat_rows, category)
+        ph = ",".join("?" * len(ids))
+        sql.append(f"AND (t.category_id IN ({ph}) "
+                   f"OR t.refund_for IN (SELECT id FROM transactions WHERE ledger_id=? AND category_id IN ({ph})))")
+        args += [*ids, ledger, *ids]
     if need_confirm:
         sql.append("AND t.need_confirm=1")
     if renqing_name:
@@ -1421,8 +1434,10 @@ def list_mappings(ledger: int):
 
 @app.post("/api/mappings")
 def create_mapping(ledger: int, body: MappingIn):
-    """v6：目标必须是已存在的分类（category_id 外键），悬空映射从结构上不可能。"""
-    if not dbm.top_cat_by_id(conn(), ledger, body.category_id):
+    """v6：目标必须是已存在的分类（category_id 外键），悬空映射从结构上不可能。
+    2026-10-29 起目标可为任意层级节点（如「三餐」二级节点）。"""
+    if not conn().execute("SELECT id FROM categories WHERE id=? AND ledger_id=?",
+                          (body.category_id, ledger)).fetchone():
         raise HTTPException(400, "目标分类不存在或不属于当前账本")
     with conn() as c:
         c.execute(

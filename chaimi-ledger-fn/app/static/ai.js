@@ -152,13 +152,26 @@ function txIcon(t){
     : _svgWrap('<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18M16 10a4 4 0 0 1-8 0"/>');
   return `<div class="tx-icon" style="background:${bg};color:${fg}">${svg}</div>`;
 }
-function pvCatOptions(cur){
-  // 选组内分类由 impSetCat 把整行转不计收支（与导入映射同口径）
-  const normal = categories.filter(c=>!c.parent_id && c.type!=="" && c.type!=="transfer");
-  const curId = (categories.find(c=>!c.parent_id && c.type==="transfer" && c.name===cur) || {}).id;
+function pvCatOptions(t){
+  // 预览分类下拉：任意层级树（每层可选）；选中按 category_id；选组内分类由 impSetCat
+  // 把整行转不计收支（与导入映射同口径）
+  const curId = t.category_id || (categories.find(c=>!c.parent_id && c.type==="transfer" && c.name===t.parent_category) || {}).id;
+  const kids = {};
+  for(const c of categories){
+    if(!c.type || c.type === "transfer") continue;
+    (kids[c.parent_id || 0] = kids[c.parent_id || 0] || []).push(c);
+  }
+  const out = [];
+  const walk = (pid, depth, prefix) => {
+    for(const c of (kids[pid] || [])){
+      const path = prefix ? prefix + " / " + c.name : c.name;
+      out.push(`<option value="${c.id}" ${c.id===curId?"selected":""} title="${esc(path)}">${"　".repeat(depth)}${depth ? "└ " : ""}${esc(c.name)}</option>`);
+      walk(c.id, depth + 1, path);
+    }
+  };
+  walk(0, 0, "");
   const tHtml = transferOptgroup(curId);
-  return normal.map(c=>`<option value="${c.id}" ${c.name===cur?"selected":""}>${esc(c.name)}</option>`).join("")
-    + (tHtml ? `<optgroup label="退款和不计收支">${tHtml}</optgroup>` : "");
+  return out.join("") + (tHtml ? `<optgroup label="退款和不计收支">${tHtml}</optgroup>` : "");
 }
 function confTags(t){   // 待确认/退款置信标签组（单行卡与双行退款卡的退款行共用）
   const ts = [];
@@ -200,7 +213,7 @@ function txRow(t, mode){
   if(pv){
     catHtml = t.type === "transfer"
       ? `<span class="tag plain">转账 · ${esc(t.category_name || "账户转账")}</span>`
-      : `<select data-pv-idx="${t._pvIdx}" onchange="impSetCat(this)">${pvCatOptions(t.parent_category)}<option value="__new__">＋新建分类…</option></select>`;
+      : `<select data-pv-idx="${t._pvIdx}" onchange="impSetCat(this)">${pvCatOptions(t)}<option value="__new__">＋新建分类…</option></select>`;
   } else {
     catHtml = t.category_name || TYPE_CN[t.type] || "";
   }

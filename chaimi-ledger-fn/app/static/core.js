@@ -270,17 +270,32 @@ async function loadPendingBadge(){
   }catch(_){ $("#pendBdg").style.display="none"; }
 }
 
-function txCatOptions(type, selId, sub){   // 一级分类 option；收支两类末尾挂「不计收支」分组（退款/不计收支），
+/* 任意层级分类树（2026-10-29）：DFS 平铺下拉，每个节点（含中间层）都是可选项；
+   缩进 + └ 前缀表层级，title 存全路径（"餐饮美食 / 三餐 / 晚餐"）供悬停查看 */
+function catTreeOptions(type, selId){
+  const kids = {};
+  for(const c of categories){
+    if(c.type !== type) continue;
+    (kids[c.parent_id || 0] = kids[c.parent_id || 0] || []).push(c);
+  }
+  const out = [];
+  const walk = (pid, depth, prefix) => {
+    for(const c of (kids[pid] || [])){
+      const path = prefix ? prefix + " / " + c.name : c.name;
+      out.push(`<option value="${c.id}" ${c.id===selId?"selected":""} title="${esc(path)}">${"　".repeat(depth)}${depth ? "└ " : ""}${esc(c.name)}</option>`);
+      walk(c.id, depth + 1, path);
+    }
+  };
+  walk(0, 0, "");
+  return out.join("");
+}
+function txCatOptions(type, selId, sub){   // 收支两类末尾挂「不计收支」分组（退款/不计收支），
   const tHtml = transferOptgroup(selId);
   if(type === "transfer") return `<option value="">未分类</option>` + tHtml;
-  return `<option value="">未分类</option>` + categories
-    .filter(c=>!c.parent_id && (c.type===type || !c.type))
-    .map(c=>`<option value="${c.id}" ${c.id===selId?"selected":""}>${esc(c.name)}</option>`).join("")
+  return `<option value="">未分类</option>` + catTreeOptions(type, selId)
     + (tHtml ? `<optgroup label="退款和不计收支">${tHtml}</optgroup>` : "");
 }
-const transferOptgroup = selId => categories
-  .filter(c=>!c.parent_id && c.type==="transfer")
-  .map(c=>`<option value="${c.id}" ${c.id===selId?"selected":""}>${esc(c.name)}</option>`).join("");   // 记账/导入预览下拉共用
+const transferOptgroup = selId => catTreeOptions("transfer", selId);   // 记账/导入预览下拉共用
 const attrNamesAll = cur => [...new Set([...attrGroupNames, ...attributions, ...(cur ? [cur] : [])])];   // 归属名单（含可选当前值；记账下拉/批量修改共用）
 function txAttrOptionsHtml(cur){
   const curShow = cur ? (raw2group[cur] || cur) : "";
