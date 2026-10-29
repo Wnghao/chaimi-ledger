@@ -28,9 +28,11 @@ async function impParse(tpl){   // tpl=向导试解析的自定义模板；缺�
     const r = await api(`/api/import/parse?ledger=${lid()}&use_ai=${useAi}`, {method:"POST", body:fd});
     impPreviews = r.previews;
     impMeta = {filename:r.filename, source:r.previews.find(p=>p.source)?.source || (tpl ? "custom" : "manual")};
+    impCounts = r;   // 预览汇总计数（一键确认后同步更新）
     await loadAccs();   // 解析期可能自动建了银行卡账户，同步账户列表供编辑弹窗/记一笔使用
     $("#imp_summary").innerHTML = impSummaryHtml(r);
     document.querySelector("#pv_summary").innerHTML = $("#imp_summary").innerHTML;
+    impSyncConfirmAllBtn();
     renderPv();
     openPv();
   }catch(e){
@@ -43,7 +45,25 @@ async function impParse(tpl){   // tpl=向导试解析的自定义模板；缺�
 /* ===== 自定义模板向导（未识别格式 → 列映射 → 存模板） ===== */
 const WIZ_FIELDS = [["date","交易时间 *"],["amount","金额 *"],["flow","收/支列"],["type","类型列"],
                     ["name","名称"],["order","订单号"],["pay","支付方式"],["merchant","商户/对方"],["note","备注"]];
-let wizFile = null, wizInfo = null;
+let wizFile = null, wizInfo = null, impCounts = null;
+
+/* 一键确认全部待确认（预览内）：按解析建议分类落定，导入后不再进待确认队列。
+   只清 need_confirm 标记——建议分类本身（兜底「其他」等）不改，导入后仍可逐笔修改。 */
+function impSyncConfirmAllBtn(){
+  const n = (impPreviews || []).filter(p => p.need_confirm).length;
+  const b = $("#pvConfirmAllBtn");
+  if(!b) return;
+  b.style.display = n ? "" : "none";
+  if(n) b.textContent = `一键确认全部待确认（${n}）`;
+}
+function impConfirmAll(){
+  const n = (impPreviews || []).filter(p => p.need_confirm).length;
+  if(!n) return msg("没有待确认行", true, "info");
+  impPreviews.forEach(p => { p.need_confirm = false; });
+  impSyncCounters();
+  renderPv();          // 重渲染即摘掉行上的「待确认」标签
+  msg(`已按建议分类确认 ${n} 笔`);
+}
 function wizClose(){ $("#wizMask").style.display="none"; wizFile = null; }
 async function wizStart(file){
   wizFile = file;
@@ -150,6 +170,7 @@ async function impSetCat(sel){
   p.category_id = +sel.value || null;
   p.need_confirm = false;
   p.classified_via = "manual";
+  impSyncCounters();
   const cat = categories.find(c=>c.id === +sel.value);
   if(cat && cat.type === "transfer"){
     p.type = "transfer";
@@ -161,6 +182,15 @@ async function impSetCat(sel){
   // 移除该行的"待确认"标签
   const row = sel.closest(".tx-row");
   row && row.querySelector(".tag.warn")?.remove();
+}
+/* 同步两处汇总文案与「一键确认」按钮的计数（impConfirmAll/impSetCat 改动后调用） */
+function impSyncCounters(){
+  if(!impCounts) return;
+  impCounts.need_confirm = (impPreviews || []).filter(p => p.need_confirm).length;
+  const html = impSummaryHtml(impCounts);
+  $("#imp_summary").innerHTML = html;
+  document.querySelector("#pv_summary").innerHTML = html;
+  impSyncConfirmAllBtn();
 }
 async function impConfirm(){
   if(!impPreviews) return;

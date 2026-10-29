@@ -50,6 +50,12 @@ async function loadTx(){
   }
   txPages = pages;
   $("#txPage").textContent = `${r.total} 笔 · 第 ${r.page} 页`;
+  // 待确认筛选下挂「一键确认全部」（仅该筛选态出现；数量实时跟列表）
+  const cab = $("#txConfirmAllBtn");
+  if(cab){
+    cab.style.display = (confirmOnly && r.total) ? "" : "none";
+    if(confirmOnly && r.total) cab.textContent = `一键确认全部（${r.total}）`;
+  }
   // 按日分组
   const groups = {};
   r.items.forEach(t=>{ const d=(t.date||"").slice(0,10); (groups[d]=groups[d]||[]).push(t); });
@@ -719,4 +725,17 @@ async function txSelApply(){
   }catch(e){
     msg("批量修改失败：" + e.message, false);
   }finally{ btn.disabled = false; }
+}
+
+/* ===== 待确认：一键确认全部（按当前建议分类落定，流水仍可随时改） ===== */
+async function confirmAllPending(){
+  const r0 = await api(`/api/transactions?ledger=${lid()}&need_confirm=1&page=1&page_size=1`);
+  if(!r0.total) return msg("没有待确认流水", true, "info");
+  if(!await uiConfirm(`将 ${r0.total} 笔待确认流水按当前建议分类落定（不再逐笔提示）。分类以后仍可随时修改。`, "一键确认")) return;
+  try{
+    const r = await api(`/api/pending/resolve-all?ledger=${lid()}`, {method:"POST"});
+    msg(`已确认 ${r.confirmed} 笔`);
+  }catch(e){ msg("操作失败：" + e.message, false); return; }
+  loadPendingBadge();   // 徽标清零时自动把「待确认」筛选切回「最近」并刷新列表
+  afterTxWrite();
 }

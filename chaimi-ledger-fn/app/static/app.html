@@ -128,6 +128,7 @@
             <button class="fchip tx-type-only" data-ft="expense" onclick="setTypeFilter(this)" style="display:none">支出</button>
             <button class="fchip tx-type-only" data-ft="income" onclick="setTypeFilter(this)" style="display:none">收入</button>
             <button class="fchip warn" id="ftConfirm" data-ft="confirm" onclick="setTypeFilter(this)">待确认</button>
+            <button class="btn btn-pri" id="txConfirmAllBtn" style="display:none;padding:6px 14px;font-size:13px" onclick="confirmAllPending()">一键确认全部</button>
             <button class="btn btn-ghost" id="txEditBtn" style="margin-left:auto;flex:0 0 auto;padding:6px 14px;font-size:13px" onclick="txSelEnter()">编辑</button>
           </div>
           <div class="ai-box" id="txSearchBox">
@@ -816,6 +817,7 @@
       <div id="pv_body" class="pv-list"></div>
     </div>
     <div class="modal-foot">
+      <button class="btn btn-ghost" id="pvConfirmAllBtn" style="display:none;margin-right:auto" onclick="impConfirmAll()">一键确认全部待确认</button>
       <button class="btn btn-ghost" onclick="closePv()">取消</button>
       <button class="btn btn-pri" onclick="impConfirm()">确认导入</button>
     </div>

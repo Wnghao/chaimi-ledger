@@ -805,6 +805,18 @@ class ResolveIn(BaseModel):
     account_id: Optional[int] = None
     refund_for: Optional[int] = None
 
+@app.post("/api/pending/resolve-all")
+def resolve_all_pending(ledger: int):
+    """一键确认全部待确认：按当前建议分类落定（只清 need_confirm 标记）。
+    不打 manual_cat——修复区以后仍可对建议分类与词典矛盾的行提出纠正建议。"""
+    with conn() as c:
+        n = c.execute("UPDATE transactions SET need_confirm=0 "
+                      "WHERE ledger_id=? AND need_confirm=1", (ledger,)).rowcount
+    if n:
+        log.info(f"一键确认：{n} 笔待确认流水按建议分类落定（ledger {ledger}）")
+    _bump_rev()
+    return {"ok": True, "confirmed": n}
+
 @app.post("/api/pending/{tid}/resolve")
 def resolve_pending(tid: int, body: ResolveIn):
     """处理待确认：改分类 / 关联退款。改分类只对当笔负责（manual_cat 保护），
