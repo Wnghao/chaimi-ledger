@@ -138,14 +138,15 @@ function weekStartOf(iso){   // 所在周的周一（周一为一周之始）
   d.setDate(d.getDate() - wd + 1);
   return _isoLocal(d);
 }
-function weekShift(start, n){
+function weekShift(start, days){   // 平移 N 天（天数语义；周步进传 7）
   const d = new Date(start + "T00:00:00");
-  d.setDate(d.getDate() + n * 7);
+  d.setDate(d.getDate() + days);
   return _isoLocal(d);
 }
 function weekNav(n){
   if(!curWeekStart) curWeekStart = weekStartOf(today());
-  curWeekStart = weekShift(curWeekStart, n);
+  curWeekStart = weekShift(curWeekStart, n * 7);
+  weekRenderLabel();   // 翻周后同步标签（onTimeChange 不重绘标签）
   onTimeChange();
 }
 function weekRenderLabel(){
