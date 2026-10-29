@@ -1,6 +1,6 @@
 /* ===== 设置层 ===== */
 function stLoad(){
-  loadCfg();loadLedgers();loadCatMgr();stAccs();stAttrs();loadBks();loadBkCfg();loadBotCfg();
+  loadCfg();loadLedgers();loadCatMgr();stAccs();stAttrs();loadBks();loadBkCfg();loadBotCfg();loadRecur();
 }
 function stTab(name){
   document.querySelectorAll("#stTabs button").forEach(b=>b.classList.toggle("on", b.dataset.s===name));
@@ -539,4 +539,131 @@ async function botTest(){
     const r = await apiSend("/api/bot/test","POST",{text:t});
     out.textContent = r.reply || "（空回复）";
   }catch(e){ out.textContent = "❌ " + e.message; }
+}
+
+/* ===== 周期记账（到期由后台线程生成流水；规则 CRUD 见 /api/recurrences） ===== */
+let recurEditId = null;   // null=新增；数字=编辑
+
+async function loadRecur(){
+  let rows = [];
+  try{ rows = await api(`/api/recurrences?ledger=${lid()}`); }
+  catch(e){ msg("规则加载失败：" + e.message, false); return; }
+  const freqDesc = r => {
+    const wd = ["一","二","三","四","五","六","日"][r.weekday ?? 0];
+    if(r.frequency === "daily") return r.interval > 1 ? `每 ${r.interval} 天` : "每天";
+    if(r.frequency === "weekly") return r.interval > 1 ? `每 ${r.interval} 周·周${wd}` : `每周·周${wd}`;
+    const dom = r.day_of_month || "月末";
+    return r.interval > 1 ? `每 ${r.interval} 月·${dom} 号` : `每月 ${dom} 号`;
+  };
+  $("#recurTable tbody").innerHTML = rows.map(r => `
+    <tr>
+      <td>${esc(r.name)}${r.note ? '<br><span class="sub">' + esc(r.note) + "</span>" : ""}</td>
+      <td>${TYPE_CN[r.type] || r.type}</td>
+      <td style="text-align:right" class="num">${curSym()}${fmt(r.amount)}</td>
+      <td>${freqDesc(r)}</td>
+      <td>${esc(r.next_date || "—")}</td>
+      <td>${r.enabled ? '<b>启用</b>' : '<span class="sub">停用</span>'}</td>
+      <td style="white-space:nowrap;text-align:right">
+        <label class="sub" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" ${r.enabled ? "checked" : ""} onchange="recurToggle(${r.id}, this.checked)">启用</label>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="recurRun(${r.id})">记一期</button>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="recurEdit(${r.id})">编辑</button>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="recurDel(${r.id}, ${qEsc(r.name)})">删</button>
+      </td></tr>`).join("");
+  $("#recurEmpty").style.display = rows.length ? "none" : "block";
+}
+
+function recurFillSelects(){
+  $("#rc_cat").innerHTML = categories
+    .filter(c => !c.parent_id)
+    .map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("#rc_acc").innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
+  $("#rc_to").innerHTML = accounts.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join("");
+}
+function recurOnFreq(){
+  const f = $("#rc_freq").value;
+  $("#rc_weekday_wrap").style.display = f === "weekly" ? "" : "none";
+  $("#rc_dom_wrap").style.display = f === "monthly" ? "" : "none";
+}
+function recurOnType(){
+  const t = $("#rc_type").value;
+  $("#rc_cat_wrap").style.display = t === "transfer" ? "none" : "";
+  $("#rc_to_wrap").style.display = t === "transfer" ? "" : "none";
+}
+function recurOpen(){
+  recurEditId = null;
+  $("#recurTitle").textContent = "新增周期规则";
+  $("#rc_name").value = ""; $("#rc_amt").value = ""; $("#rc_note").value = "";
+  $("#rc_type").value = "expense"; $("#rc_freq").value = "monthly";
+  $("#rc_interval").value = 1; $("#rc_weekday").value = "0"; $("#rc_dom").value = 1;
+  $("#rc_start").value = today();
+  recurFillSelects(); recurOnFreq(); recurOnType();
+  $("#recurMask").style.display = "flex";
+}
+async function recurEdit(id){
+  const rows = await api(`/api/recurrences?ledger=${lid()}`);
+  const r = rows.find(x => x.id === id);
+  if(!r){ msg("规则不存在", false); return; }
+  recurEditId = id;
+  $("#recurTitle").textContent = "编辑规则";
+  $("#rc_name").value = r.name;
+  $("#rc_type").value = r.type; $("#rc_freq").value = r.frequency;
+  $("#rc_interval").value = r.interval || 1;
+  $("#rc_weekday").value = String(r.weekday ?? 0);
+  $("#rc_dom").value = r.day_of_month || 1;
+  $("#rc_start").value = r.next_date || today();
+  $("#rc_note").value = r.note || "";
+  recurFillSelects(); recurOnFreq(); recurOnType();
+  $("#rc_cat").value = r.category_id || "";
+  $("#rc_acc").value = r.account_id || "";
+  $("#rc_to").value = r.to_account_id || "";
+  $("#recurMask").style.display = "flex";
+}
+function recurClose(){ $("#recurMask").style.display = "none"; }
+async function recurSave(){
+  const body = {
+    name: $("#rc_name").value.trim(),
+    type: $("#rc_type").value,
+    amount: Math.round(parseFloat($("#rc_amt").value || "0") * 100),
+    frequency: $("#rc_freq").value,
+    interval: Math.max(1, parseInt($("#rc_interval").value || "1", 10)),
+    weekday: $("#rc_freq").value === "weekly" ? parseInt($("#rc_weekday").value, 10) : null,
+    day_of_month: $("#rc_freq").value === "monthly" ? parseInt($("#rc_dom").value || "1", 10) : null,
+    category_id: $("#rc_type").value === "transfer" ? null : (+$("#rc_cat").value || null),
+    account_id: +$("#rc_acc").value || null,
+    to_account_id: $("#rc_type").value === "transfer" ? (+$("#rc_to").value || null) : null,
+    note: $("#rc_note").value.trim() || null,
+    start_date: $("#rc_start").value,
+  };
+  if(!body.name){ msg("名称不能为空", false); return; }
+  if(!(body.amount > 0)){ msg("金额须大于 0", false); return; }
+  if(!body.start_date){ msg("请选首次到期日", false); return; }
+  try{
+    if(recurEditId) await apiSend(`/api/recurrences/${recurEditId}`, "PUT", body);
+    else await apiSend(`/api/recurrences?ledger=${lid()}`, "POST", body);
+  }catch(e){ msg("保存失败：" + e.message, false); return; }
+  msg("已保存");
+  recurClose();
+  loadRecur();
+}
+async function recurToggle(id, on){
+  try{ await apiSend(`/api/recurrences/${id}`, "PUT", {enabled: on}); }
+  catch(e){ msg("操作失败：" + e.message, false); loadRecur(); return; }
+  msg(on ? "已启用" : "已停用");
+  loadRecur();
+}
+async function recurRun(id){
+  if(!(await uiConfirm("立即生成这一期流水？（到期未触发按到期日入账，否则按今天）", "记一期"))) return;
+  try{
+    const r = await api(`/api/recurrences/${id}/run`, {method:"POST"});
+    msg(r.tx_id ? "已生成流水" : "该期已生成过，跳过");
+  }catch(e){ msg("执行失败：" + e.message, false); return; }
+  loadRecur();
+}
+async function recurDel(id, name){
+  if(!(await uiConfirm(`删除规则「${name}」？已生成的流水不受影响。`, "删除"))) return;
+  try{ await api(`/api/recurrences/${id}`, {method:"DELETE"}); }
+  catch(e){ msg("删除失败：" + e.message, false); return; }
+  msg("已删除");
+  loadRecur();
 }

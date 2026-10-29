@@ -210,6 +210,7 @@ function showPage(p){
   if(p!=="list" && txSelMode) txSelExit();
   if(p==="list") { loadTx(); loadSumbarList(); }
   if(p==="renqing") loadRenqing();
+  if(p==="debts") loadDebts();
   if(p==="cal"||p==="stats") refreshStats();
   if(p==="io") { loadBatches(); expInitRange(); }
   if(p==="ai"){ loadSumbarAi(); aiToday(); }

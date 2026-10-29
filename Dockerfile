@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /app
 COPY chaimi-ledger-fn/app/src/ /app/src/
 COPY chaimi-ledger-fn/app/static/ /app/static/
+# 应用图片（头像/图标，/images/ 路由下发）——漏拷会让 images/avatar-*.png 全 404
+COPY chaimi-ledger-fn/app/server/ /app/server/
 
 RUN mkdir -p /data
 VOLUME ["/data"]

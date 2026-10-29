@@ -8,13 +8,12 @@
 screenshots/
 LICENSE
 
-# 飞牛 fpk 打包链（容器化用不到）
+# 飞牛 fpk 打包链（容器化用不到；app/server/images 例外——/images/ 路由要下发头像）
 build.bat
 chaimi-ledger-fn/cmd/
 chaimi-ledger-fn/config/
 chaimi-ledger-fn/wizard/
 chaimi-ledger-fn/manifest
-chaimi-ledger-fn/app/server/
 chaimi-ledger-fn/app/data/
 
 # 本地开发产物

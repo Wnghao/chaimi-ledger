@@ -37,8 +37,10 @@ import bot_core
 import bot_ilink
 import config
 import db as dbm
+import debts as debtsm
 import import_bill as ib
 import import_classify as ic
+import recurrence as recm
 
 applog.setup()   # 进程内首个初始化点：后续 get() 的子 logger 统一走双 handler
 log = applog.get("server")
@@ -53,6 +55,8 @@ async def lifespan(app: FastAPI):
     """启动/停机钩子（lifespan，替代已弃用的 on_event）。"""
     dbm.init_db()
     _auto_backup.start()
+    _recur_runner.on_change = _bump_rev   # 生成流水后唤醒前端长轮询（同 bot 写库链路）
+    _recur_runner.start()
     _bot_apply()
     # 应用文件夹定位诊断：找不到时备份回退 @appdata，日志留痕便于排查
     bot_core._on_change = _bump_rev          # bot 记账/改动 → 唤醒长轮询 → 前端自刷新
@@ -126,6 +130,7 @@ async def strip_gateway_prefix(request: Request, call_next):
     return await call_next(request)
 
 _auto_backup = backup.AutoBackup()
+_recur_runner = recm.RecurRunner()   # 周期记账到期生成流水（on_change 在 lifespan 注入 _bump_rev）
 _ilink = bot_ilink.ILinkManager()   # 通道 A：多凭证管理(一账本一用户一机器人)
 _REV = {"n": 0}                     # 数据变更计数(写库时 +1,长轮询 /api/rev/wait 按此唤醒前端刷新)
 _REV_COND = threading.Condition()  # Condition+wait_for：锁内原子判定谓词，杜绝 Event「检查与挂起之间
@@ -286,9 +291,11 @@ def update_ledger(lid: int, body: LedgerIn):
 @app.delete("/api/ledgers/{lid}")
 def delete_ledger(lid: int):
     with conn() as c:
-        # import_batches 一并清（审计发现的历史残余：漏清会留孤儿批次行）
+        # import_batches 一并清（审计发现的历史残余：漏清会留孤儿批次行）；
+        # debt_repays 无 ledger_id 列，随 debts 外键 CASCADE 清
         for t in ("transactions", "import_batches", "category_mappings", "categories",
-                  "accounts", "attributions", "attribution_groups"):
+                  "accounts", "attributions", "attribution_groups",
+                  "recurrences", "debts"):
             c.execute(f"DELETE FROM {t} WHERE ledger_id=?", (lid,))
         c.execute("DELETE FROM ledgers WHERE id=?", (lid,))
     return {"ok": True}
@@ -875,6 +882,196 @@ def stats_renqing(ledger: int):
     """人情往来汇总：db.stats_renqing 唯一实现（统计页与 AI 查账 kind=renqing 共用）。
     given=我给出（支出）、received=我收到（收入），balance=given-received>0 即对方尚未还礼。"""
     return dbm.stats_renqing(conn(), ledger)
+
+# ---------- 债务台账（纯独立登记，不碰流水） ----------
+
+class DebtIn(BaseModel):
+    direction: str          # out=借出（别人欠我）/ in=借入（我欠别人）
+    person: str             # 借出/入人
+    amount: int             # 分
+    date: str               # 借出/入时间
+    due_date: Optional[str] = None
+    note: Optional[str] = None
+
+class DebtUpIn(BaseModel):
+    direction: Optional[str] = None
+    person: Optional[str] = None
+    amount: Optional[int] = None
+    date: Optional[str] = None
+    due_date: Optional[str] = None
+    note: Optional[str] = None
+    status: Optional[str] = None
+
+class RepayIn(BaseModel):
+    amount: int             # 分
+    date: str
+    note: Optional[str] = None
+
+@app.get("/api/debts")
+def list_debts(ledger: int, status: str = "all"):
+    return debtsm.debt_list(conn(), ledger, status)
+
+@app.get("/api/debts/summary")
+def debts_summary(ledger: int):
+    return debtsm.debt_summary(conn(), ledger)
+
+@app.post("/api/debts")
+def add_debt(ledger: int, body: DebtIn):
+    try:
+        with conn() as c:
+            did = debtsm.debt_add(c, ledger, body.direction, body.person,
+                                  body.amount, body.date, body.due_date, body.note)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _bump_rev()
+    return {"id": did}
+
+@app.put("/api/debts/{did}")
+def update_debt(did: int, body: DebtUpIn):
+    try:
+        with conn() as c:
+            ok = debtsm.debt_update(c, did, body.model_dump(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not ok:
+        raise HTTPException(404, "债务不存在")
+    _bump_rev()
+    return {"ok": True}
+
+@app.delete("/api/debts/{did}")
+def delete_debt(did: int):
+    with conn() as c:
+        ok = debtsm.debt_delete(c, did)
+    if not ok:
+        raise HTTPException(404, "债务不存在")
+    _bump_rev()
+    return {"ok": True}
+
+@app.post("/api/debts/{did}/repays")
+def add_repay(did: int, body: RepayIn):
+    """给指定债务记一笔还款（部分还款可多次）；累计达本金自动转已还清。"""
+    try:
+        with conn() as c:
+            rid = debtsm.repay_add(c, did, body.amount, body.date, body.note)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    _bump_rev()
+    return {"id": rid}
+
+@app.delete("/api/repays/{rid}")
+def delete_repay(rid: int):
+    with conn() as c:
+        ok = debtsm.repay_delete(c, rid)
+    if not ok:
+        raise HTTPException(404, "还款记录不存在")
+    _bump_rev()
+    return {"ok": True}
+
+@app.get("/api/debts/{did}/repays")
+def list_repays(did: int):
+    return debtsm.repays_of(conn(), did)
+
+# ---------- 周期自动记账（到期由后台线程生成流水，见 recurrence.py） ----------
+
+class RecurIn(BaseModel):
+    name: str
+    type: str = "expense"
+    amount: int             # 分
+    frequency: str          # daily / weekly / monthly
+    interval: int = 1
+    weekday: Optional[int] = None
+    day_of_month: Optional[int] = None
+    category_id: Optional[int] = None
+    account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    note: Optional[str] = None
+    start_date: Optional[str] = None   # 首次到期日，缺省今天
+    enabled: bool = True
+
+class RecurUpIn(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    amount: Optional[int] = None
+    frequency: Optional[str] = None
+    interval: Optional[int] = None
+    weekday: Optional[int] = None
+    day_of_month: Optional[int] = None
+    category_id: Optional[int] = None
+    account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    note: Optional[str] = None
+    enabled: Optional[bool] = None
+
+@app.get("/api/recurrences")
+def list_recurrences(ledger: int):
+    return [dict(r) for r in conn().execute(
+        "SELECT * FROM recurrences WHERE ledger_id=? ORDER BY enabled DESC, next_date, id",
+        (ledger,))]
+
+@app.post("/api/recurrences")
+def add_recurrence(ledger: int, body: RecurIn):
+    try:
+        recm.validate(body.frequency, body.interval, body.weekday, body.day_of_month)
+        if body.type not in ("expense", "income", "transfer"):
+            raise ValueError("type 须为 expense/income/transfer")
+        if int(body.amount) <= 0:
+            raise ValueError("金额须大于 0")
+        start = body.start_date or datetime.now().strftime("%Y-%m-%d")
+        date.fromisoformat(start)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    with conn() as c:
+        cur = c.execute(
+            """INSERT INTO recurrences(ledger_id, enabled, name, type, amount, frequency,
+               interval, weekday, day_of_month, category_id, account_id, to_account_id,
+               note, next_date) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (ledger, 1 if body.enabled else 0, body.name.strip(), body.type, body.amount,
+             body.frequency, body.interval, body.weekday, body.day_of_month,
+             body.category_id, body.account_id, body.to_account_id,
+             (body.note or "").strip() or None, start))
+    return {"id": cur.lastrowid}
+
+@app.put("/api/recurrences/{rid}")
+def update_recurrence(rid: int, body: RecurUpIn):
+    row = conn().execute("SELECT * FROM recurrences WHERE id=?", (rid,)).fetchone()
+    if not row:
+        raise HTTPException(404, "规则不存在")
+    f = body.model_dump(exclude_unset=True)
+    try:
+        recm.validate(f.get("frequency", row["frequency"]),
+                      f.get("interval", row["interval"]),
+                      f.get("weekday", row["weekday"]),
+                      f.get("day_of_month", row["day_of_month"]))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if "name" in f and not f["name"].strip():
+        raise HTTPException(400, "名称不能为空")
+    if f:
+        sets = ", ".join(f"{k}=?" for k in f)
+        with conn() as c:
+            c.execute(f"UPDATE recurrences SET {sets} WHERE id=?",
+                      (*[f[k] for k in f], rid))
+    return {"ok": True}
+
+@app.delete("/api/recurrences/{rid}")
+def delete_recurrence(rid: int):
+    with conn() as c:
+        cur = c.execute("DELETE FROM recurrences WHERE id=?", (rid,))
+    if not cur.rowcount:
+        raise HTTPException(404, "规则不存在")
+    return {"ok": True}
+
+@app.post("/api/recurrences/{rid}/run")
+def run_recurrence(rid: int):
+    """手动记一期（试跑/提前记）：到期未触发按到期日，否则按今天；节奏锚不变。"""
+    with conn() as c:
+        r = c.execute("SELECT * FROM recurrences WHERE id=?", (rid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "规则不存在")
+        tx = recm.fire_now(c, r, datetime.now().strftime("%Y-%m-%d"))
+    if tx:
+        _bump_rev()
+    return {"tx_id": tx}
 
 # ---------- 导入 / 导出 ----------
 

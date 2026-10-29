@@ -94,6 +94,53 @@ CREATE TABLE IF NOT EXISTS category_mappings (
   FOREIGN KEY (ledger_id) REFERENCES ledgers(id),
   FOREIGN KEY (category_id) REFERENCES categories(id));
 
+-- 周期自动记账规则（到期由后台线程生成流水，见 recurrence.py）。
+-- next_date 是权威到期日；补跑刻意不做（浩拍板）：停机漏掉的周期不回补，
+-- 轮询到 next_date<=今天 时只生成 next_date 当期一笔再推进
+CREATE TABLE IF NOT EXISTS recurrences (
+  id INTEGER PRIMARY KEY,
+  ledger_id INTEGER NOT NULL,
+  enabled INTEGER DEFAULT 1,
+  name TEXT NOT NULL,               -- 交易名称（生成流水的 name）
+  type TEXT NOT NULL DEFAULT 'expense',
+  amount INTEGER NOT NULL,          -- 分
+  frequency TEXT NOT NULL,          -- daily | weekly | monthly
+  interval INTEGER DEFAULT 1,       -- 每 N 天/周/月
+  weekday INTEGER,                  -- weekly：0=周一 … 6=周日
+  day_of_month INTEGER,             -- monthly：1-31，超月末自动钳到当月最后一天
+  category_id INTEGER,
+  account_id INTEGER,
+  to_account_id INTEGER,
+  note TEXT,
+  next_date TEXT,                   -- 下次到期日 YYYY-MM-DD
+  last_tx_id INTEGER,               -- 最近一次生成流水 id（审计）
+  last_run_date TEXT,               -- 最近一次实际触发日（审计）
+  created TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (ledger_id) REFERENCES ledgers(id));
+
+-- 债务登记（纯独立台账，不碰流水——浩拍板）：借出/借入本金与还款进度
+CREATE TABLE IF NOT EXISTS debts (
+  id INTEGER PRIMARY KEY,
+  ledger_id INTEGER NOT NULL,
+  direction TEXT NOT NULL,          -- out=借出（别人欠我）| in=借入（我欠别人）
+  person TEXT NOT NULL,             -- 借出/入人
+  amount INTEGER NOT NULL,          -- 本金（分）
+  date TEXT NOT NULL,               -- 借出/入时间
+  due_date TEXT,                    -- 约定还款日（可选，逾期提醒用）
+  status TEXT DEFAULT 'open',       -- open | settled（repays 汇总自动维护）
+  note TEXT,
+  created TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (ledger_id) REFERENCES ledgers(id));
+
+CREATE TABLE IF NOT EXISTS debt_repays (
+  id INTEGER PRIMARY KEY,
+  debt_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL,          -- 本次还款（分）
+  date TEXT NOT NULL,
+  note TEXT,
+  created TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (debt_id) REFERENCES debts(id) ON DELETE CASCADE);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_map_ledger
   ON category_mappings(ledger_id, flow_type, source);
 
