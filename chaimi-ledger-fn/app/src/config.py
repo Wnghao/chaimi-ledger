@@ -44,6 +44,9 @@ DEFAULTS: dict = {
     # Web 界面可选 Basic Auth（评估 R-04 中期项；默认关——内网自托管依赖 fnOS 网关边界，见 README 部署前提）。
     # enabled=true 时除 /healthz 外全站过门（浏览器原生弹窗，输一次即记）；用户名/密码常量时间比较。
     "web_auth": {"enabled": False, "username": "chaimi", "password": ""},
+    # WebDAV 备份（可选）：url=服务根地址（坚果云 https://dav.jianguoyun.com/dav/ 等），
+    # dir=远端目录（不存在自动创建）；auto=true 时自动备份生成后同步上传远端
+    "webdav": {"url": "", "username": "", "password": "", "dir": "chaimi-ledger", "auto": False},
 }
 
 TRIM_PKGETC = os.environ.get("TRIM_PKGETC", "")

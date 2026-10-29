@@ -1,6 +1,6 @@
 /* ===== 设置层 ===== */
 function stLoad(){
-  loadCfg();loadLedgers();loadCatMgr();stAccs();stAttrs();loadBks();loadBkCfg();loadBotCfg();loadRecur();
+  loadCfg();loadLedgers();loadCatMgr();stAccs();stAttrs();loadBks();loadBkCfg();loadWdCfg();loadBotCfg();loadBatches();expInitRange();
 }
 function stTab(name){
   document.querySelectorAll("#stTabs button").forEach(b=>b.classList.toggle("on", b.dataset.s===name));
@@ -371,6 +371,63 @@ async function delBk(f){
   msg("已删除");loadBks();
 }
 async function doBackup(){await api("/api/backup",{method:"POST"});msg("备份完成 ✅");loadBks();}
+
+/* ===== WebDAV 备份（配置存 chaimi.conf；远端文件可下载回本地备份表再恢复） ===== */
+async function loadWdCfg(){
+  const c = await getCfg();
+  const w = c.webdav || {};
+  $("#wd_url").value = w.url || "";
+  $("#wd_dir").value = w.dir || "chaimi-ledger";
+  $("#wd_user").value = w.username || "";
+  $("#wd_pass").value = w.password || "";
+  $("#wd_auto").checked = !!w.auto;
+}
+async function saveWdCfg(){
+  try{
+    await apiSend("/api/webdav", "PUT", {
+      url: $("#wd_url").value.trim(), username: $("#wd_user").value.trim(),
+      password: $("#wd_pass").value, dir: $("#wd_dir").value.trim() || "chaimi-ledger",
+      auto: $("#wd_auto").checked});
+  }catch(e){ return msg(e.message, false); }
+  _cfgCache = null;
+  msg("WebDAV 配置已保存 ✅");
+}
+async function wdTest(){
+  const b = event && event.target; if(b){ b.disabled = true; }
+  try{
+    const r = await api("/api/webdav/test", {method:"POST"});
+    msg(r.dir_created ? "连接成功，远端目录已创建 ✅" : "连接成功 ✅");
+  }catch(e){ msg(e.message, false); }
+  finally{ if(b) b.disabled = false; }
+}
+async function wdUploadLatest(){
+  const bs = await api(`/api/backups?ledger=${lid()}`).catch(()=>[]);
+  if(!bs.length) return msg("还没有本地备份：先点「立即备份」", false);
+  if(!await uiConfirm(`把最新备份「${bs[0].file}」（含配置/小票副本）上传到 WebDAV？`, "上传")) return;
+  const b = event && event.target; if(b){ b.disabled = true; }
+  try{
+    const r = await apiSend("/api/webdav/upload", "POST", {file: bs[0].file});
+    msg(`已上传 ${r.uploaded.length} 个文件 ✅`); wdList();
+  }catch(e){ msg(e.message, false); }
+  finally{ if(b) b.disabled = false; }
+}
+async function wdList(){
+  const tb = $("#wdTable"), empty = $("#wdEmpty");
+  let files = [];
+  try{ files = await api("/api/webdav/files"); }
+  catch(e){ return msg(e.message, false); }
+  tb.style.display = files.length ? "" : "none";
+  empty.style.display = files.length ? "none" : "";
+  tb.querySelector("tbody").innerHTML = files.map(f => `
+    <tr><td>${esc(f.file)}</td><td class="num">${fmt(f.size)}</td>
+    <td><button class="btn btn-ghost" style="padding:2px 10px;font-size:12px" onclick="wdDownload('${qEsc(f.file)}')">下载到本地</button></td></tr>`).join("");
+}
+async function wdDownload(f){
+  if(!await uiConfirm(`下载远端备份「${f}」到本地备份列表？（同名本地文件会被覆盖，之后可在上方列表里恢复）`, "下载")) return;
+  try{ await apiSend("/api/webdav/download", "POST", {file: f}); }
+  catch(e){ return msg(e.message, false); }
+  msg("已下载到本地备份 ✅"); loadBks();
+}
 async function restore(f){
   if(!await uiConfirm("恢复将覆盖当前全部数据，确定？", "恢复"))return;
   await apiSend("/api/restore","POST",{file:f});

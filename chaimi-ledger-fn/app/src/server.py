@@ -1467,6 +1467,57 @@ def update_mapping(mid: int, body: dict):
 def do_backup():
     return backup.create_backup()
 
+# ---------- WebDAV 备份（可选；配置存 chaimi.conf，密码与 LLM Key 同级存储） ----------
+
+class WebdavIn(BaseModel):
+    url: str = ""
+    username: str = ""
+    password: str = ""
+    dir: str = "chaimi-ledger"
+    auto: bool = False
+
+@app.get("/api/webdav")
+def get_webdav():
+    return config.load().get("webdav") or {}
+
+@app.put("/api/webdav")
+def save_webdav(body: WebdavIn):
+    if body.url and not body.url.startswith(("http://", "https://")):
+        raise HTTPException(400, "WebDAV 地址须以 http(s):// 开头")
+    cfg = config.load()
+    cfg["webdav"] = body.model_dump()
+    config.save(cfg)
+    return {"ok": True}
+
+@app.post("/api/webdav/test")
+def test_webdav():
+    try:
+        return backup.webdav_test()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.post("/api/webdav/upload")
+def upload_webdav(body: dict):
+    try:
+        return backup.webdav_upload(body.get("file", ""))
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(400, str(e))
+
+@app.get("/api/webdav/files")
+def list_webdav_files():
+    try:
+        return backup.webdav_list()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.post("/api/webdav/download")
+def download_webdav(body: dict):
+    try:
+        r = backup.webdav_download(body.get("file", ""))
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(400, str(e))
+    return r
+
 @app.get("/api/backups")
 def get_backups():
     return backup.list_backups()

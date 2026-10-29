@@ -35,8 +35,8 @@
     <button class="nav-item" data-p="stats" title="统计"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-chart"/></svg><span class="lbl">统计</span></button>
     <button class="nav-item" data-p="renqing" title="人情往来"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg><span class="lbl">人情往来</span></button>
     <button class="nav-item" data-p="debts" title="借出借入"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6 12h.01M18 12h.01"/></svg><span class="lbl">借出借入</span></button>
+    <button class="nav-item" data-p="recur" title="周期记账"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"/><polyline points="21 3 21 9 15 9"/></svg><span class="lbl">周期记账</span></button>
     <div class="spacer"></div>
-    <button class="nav-item" data-p="io" title="导入和导出"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dl"/></svg><span class="lbl">导入和导出</span></button>
     <button class="nav-item" data-p="settings" title="设置"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span class="lbl">设置</span></button>
   </nav>
 
@@ -360,73 +360,6 @@
       </div>
     </section>
 
-    <!-- ===== 导入和导出（单页 3 区块） ===== -->
-    <section class="page" id="tab-io">
-      <!-- 区块 1：导入账单 -->
-      <div class="card">
-        <b>导入账单</b>
-        <div class="sub" style="margin-top:2px">支持微信（xlsx）/ 支付宝、京东（CSV）/ 本应用导出文件，按内容自动识别</div>
-        <div class="sub" style="margin-top:4px;color:var(--warn,#e8a93a)">京东账单建议往前多导 10 天，避免跨月退款漏匹配</div>
-        <details style="margin-top:8px">
-          <summary class="sub" style="cursor:pointer">怎么导出账单文件？</summary>
-          <div class="sub" style="margin-top:6px;line-height:1.9">
-            <b>微信</b>：我 - 服务 - 钱包 - 右上角账单 - 右上角更多 - 下载账单（个人对账）<br>
-            <b>支付宝</b>：我的 - 账单 - 右上角更多 - 账单工具 - 开具交易流水证明（个人对账）<br>
-            <b>京东</b>：我的 - 钱包 - 账单 - 右上角更多 - 账单导出（个人对账）
-          </div>
-        </details>
-        <label class="imp-btn" id="impBtn">
-          <input type="file" id="imp_file" accept=".csv,.xlsx" hidden onchange="impOnPick(this)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dl"/></svg>
-          <span>选择文件</span>
-          <span class="imp-name" id="imp_name">未选择文件</span>
-        </label>
-        <div class="imp-opts">
-          <label class="imp-ai"><input type="checkbox" id="imp_ai" checked>AI 兜底分类</label>
-          <button class="btn btn-pri" onclick="impParse()">解析</button>
-        </div>
-        <div id="imp_summary" class="sub" style="margin-top:8px"></div>
-        <div id="imp_repair" class="sub" style="display:none;margin-top:6px;color:var(--warn,#e8a93a)"></div>
-        <div id="imp_repair_detail" style="display:none"></div>
-        <div id="tpl_row" class="sub" style="margin-top:6px">自定义模板：<span id="tplList">无</span></div>
-      </div>
-
-      <!-- 区块 2：导入批次 -->
-      <div class="card" style="margin-top:12px">
-        <b>导入批次</b><span class="sub" style="margin-left:8px">撤销会删除该批次全部流水</span>
-        <table id="batchTable" style="margin-top:8px"><thead><tr><th>时间</th><th>文件</th><th>来源</th><th>笔数</th><th></th></tr></thead><tbody></tbody></table>
-      </div>
-
-      <!-- 区块 3：导出账单 -->
-      <div class="card" style="margin-top:12px">
-        <b>导出账单</b>
-        <div class="sub" style="margin-top:2px">CSV / xlsx 全量导出（含退款关联、归属、双账户）；导出文件可再导入，无损还原</div>
-        <div class="exp-row">
-          <div class="exp-dates">
-            <div class="exp-field">
-              <span class="exp-label">起始</span>
-              <input id="exp_from" type="text" readonly onclick="pickDate(this,'date')">
-            </div>
-            <span class="exp-sep">至</span>
-            <div class="exp-field">
-              <span class="exp-label">截止</span>
-              <input id="exp_to" type="text" readonly onclick="pickDate(this,'date')">
-            </div>
-          </div>
-          <div class="exp-presets">
-            <button class="btn btn-ghost btn-sm" data-mode="month" onclick="expSetRange('month')">本月</button>
-            <button class="btn btn-ghost btn-sm" data-mode="year" onclick="expSetRange('year')">本年</button>
-            <button class="btn btn-ghost btn-sm" data-mode="all" onclick="expSetRange('all')">全部</button>
-          </div>
-          <span class="exp-btns">
-            <button class="btn btn-ghost" onclick="exportReceipts()">下载小票 zip</button>
-            <button class="btn btn-pri" onclick="exportCsv('csv')">下载 CSV</button>
-            <button class="btn btn-pri" onclick="exportCsv('xlsx')">下载 xlsx</button>
-          </span>
-        </div>
-      </div>
-    </section>
-
     <!-- ===== 设置页（与其他菜单一致） ===== -->
     <section class="page" id="tab-settings">
       <div class="st-head">
@@ -434,8 +367,8 @@
           <button data-s="ai" class="on">AI 配置</button>
           <button data-s="book">用户与预算</button>
           <button data-s="catmap">分类管理</button>
-          <button data-s="recur">周期记账</button>
           <button data-s="backup">备份与日志</button>
+          <button data-s="io">导入和导出</button>
           <button data-s="bot">微信机器人</button>
         </div>
       </div>
@@ -510,21 +443,6 @@
       </div>
     </section>
 
-    <section class="st-sec" data-s="recur">
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
-          <h2 class="st-h2">周期记账</h2>
-          <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="recurOpen()">＋ 新增规则</button>
-        </div>
-        <div class="sub" style="margin-bottom:8px">房租、订阅、工资等固定收支：到期日由后台自动生成一笔流水（流水来源标记「周期」）。服务停机漏掉的周期不回补；改动规则立即生效，无需重启。</div>
-        <table id="recurTable"><thead><tr>
-          <th>名称</th><th>类型</th><th style="text-align:right">金额</th><th>周期</th>
-          <th>下次到期</th><th>状态</th><th style="width:190px"></th>
-        </tr></thead><tbody></tbody></table>
-        <div class="sub" id="recurEmpty" style="display:none;padding:8px 0">暂无规则：点右上「＋ 新增规则」</div>
-      </div>
-    </section>
-
     <section class="st-sec" data-s="catmap">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
@@ -554,9 +472,114 @@
         <table id="bkTable"><thead><tr><th>时间</th><th>大小</th><th></th></tr></thead><tbody></tbody></table>
         <div class="sub" style="margin-top:8px;color:var(--expense)">恢复将覆盖当前全部数据（含 AI 配置），请谨慎操作。</div>
       </div>
+      <div class="card" style="margin-top:14px"><h2 class="st-h2">WebDAV 备份（可选）</h2>
+        <div class="sub" style="margin-bottom:8px">把备份文件同步到你自己的 WebDAV 服务（坚果云 / 群晖 / Alist 等），异地容灾。密码与本机其他密钥同级存储；开启「自动上传」后，每月/每年自动备份生成时会同步上传远端。</div>
+        <div class="row" style="align-items:end;gap:8px;flex-wrap:wrap">
+          <div style="flex:2;min-width:200px"><label>服务地址</label><input id="wd_url" placeholder="https://dav.jianguoyun.com/dav/"></div>
+          <div><label>远端目录</label><input id="wd_dir" placeholder="chaimi-ledger"></div>
+        </div>
+        <div class="row" style="margin-top:0;align-items:end;gap:8px;flex-wrap:wrap">
+          <div><label>用户名</label><input id="wd_user" autocomplete="off"></div>
+          <div><label>密码</label><input id="wd_pass" type="password" autocomplete="new-password"></div>
+          <div class="bk-toggle">
+            <input type="checkbox" id="wd_auto" style="width:auto"><label style="margin:0" for="wd_auto">自动上传</label>
+          </div>
+        </div>
+        <p style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-pri" onclick="saveWdCfg()">保存配置</button>
+          <button class="btn btn-ghost" onclick="wdTest()">测试连接</button>
+          <button class="btn btn-ghost" onclick="wdUploadLatest()">上传最新备份</button>
+          <button class="btn btn-ghost" onclick="wdList()">刷新远端列表</button>
+        </p>
+        <table id="wdTable" style="display:none"><thead><tr><th>远端文件</th><th>大小</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="sub" id="wdEmpty" style="display:none;margin-top:6px">远端暂无备份</div>
+      </div>
       <div class="card" style="margin-top:14px"><h2 class="st-h2">日志</h2>
         <div class="sub" style="margin-bottom:8px">应用运行日志（含 AI 记账解析记录），排查问题时下载发给维护者。</div>
         <button class="btn btn-ghost" onclick="dlLogs()">下载日志</button>
+      </div>
+    </section>
+
+    <!-- ===== 导入和导出（原独立页，迁入设置） ===== -->
+    <section class="st-sec" data-s="io">
+      <!-- 区块 1：导入账单 -->
+      <div class="card">
+        <b>导入账单</b>
+        <div class="sub" style="margin-top:2px">支持微信（xlsx）/ 支付宝、京东（CSV）/ 本应用导出文件，按内容自动识别</div>
+        <div class="sub" style="margin-top:4px;color:var(--warn,#e8a93a)">京东账单建议往前多导 10 天，避免跨月退款漏匹配</div>
+        <details style="margin-top:8px">
+          <summary class="sub" style="cursor:pointer">怎么导出账单文件？</summary>
+          <div class="sub" style="margin-top:6px;line-height:1.9">
+            <b>微信</b>：我 - 服务 - 钱包 - 右上角账单 - 右上角更多 - 下载账单（个人对账）<br>
+            <b>支付宝</b>：我的 - 账单 - 右上角更多 - 账单工具 - 开具交易流水证明（个人对账）<br>
+            <b>京东</b>：我的 - 钱包 - 账单 - 右上角更多 - 账单导出（个人对账）
+          </div>
+        </details>
+        <label class="imp-btn" id="impBtn">
+          <input type="file" id="imp_file" accept=".csv,.xlsx" hidden onchange="impOnPick(this)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#ic-dl"/></svg>
+          <span>选择文件</span>
+          <span class="imp-name" id="imp_name">未选择文件</span>
+        </label>
+        <div class="imp-opts">
+          <label class="imp-ai"><input type="checkbox" id="imp_ai" checked>AI 兜底分类</label>
+          <button class="btn btn-pri" onclick="impParse()">解析</button>
+        </div>
+        <div id="imp_summary" class="sub" style="margin-top:8px"></div>
+        <div id="imp_repair" class="sub" style="display:none;margin-top:6px;color:var(--warn,#e8a93a)"></div>
+        <div id="imp_repair_detail" style="display:none"></div>
+        <div id="tpl_row" class="sub" style="margin-top:6px">自定义模板：<span id="tplList">无</span></div>
+      </div>
+
+      <!-- 区块 2：导入批次 -->
+      <div class="card" style="margin-top:12px">
+        <b>导入批次</b><span class="sub" style="margin-left:8px">撤销会删除该批次全部流水</span>
+        <table id="batchTable" style="margin-top:8px"><thead><tr><th>时间</th><th>文件</th><th>来源</th><th>笔数</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+
+      <!-- 区块 3：导出账单 -->
+      <div class="card" style="margin-top:12px">
+        <b>导出账单</b>
+        <div class="sub" style="margin-top:2px">CSV / xlsx 全量导出（含退款关联、归属、双账户）；导出文件可再导入，无损还原</div>
+        <div class="exp-row">
+          <div class="exp-dates">
+            <div class="exp-field">
+              <span class="exp-label">起始</span>
+              <input id="exp_from" type="text" readonly onclick="pickDate(this,'date')">
+            </div>
+            <span class="exp-sep">至</span>
+            <div class="exp-field">
+              <span class="exp-label">截止</span>
+              <input id="exp_to" type="text" readonly onclick="pickDate(this,'date')">
+            </div>
+          </div>
+          <div class="exp-presets">
+            <button class="btn btn-ghost btn-sm" data-mode="month" onclick="expSetRange('month')">本月</button>
+            <button class="btn btn-ghost btn-sm" data-mode="year" onclick="expSetRange('year')">本年</button>
+            <button class="btn btn-ghost btn-sm" data-mode="all" onclick="expSetRange('all')">全部</button>
+          </div>
+          <span class="exp-btns">
+            <button class="btn btn-ghost" onclick="exportReceipts()">下载小票 zip</button>
+            <button class="btn btn-pri" onclick="exportCsv('csv')">下载 CSV</button>
+            <button class="btn btn-pri" onclick="exportCsv('xlsx')">下载 xlsx</button>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 周期记账（独立页，规则 CRUD 见 /api/recurrences） ===== -->
+    <section class="page" id="tab-recur">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+          <b>周期记账</b>
+          <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="recurOpen()">＋ 新增规则</button>
+        </div>
+        <div class="sub" style="margin-bottom:8px">房租、订阅、工资等固定收支：到期日由后台自动生成一笔流水（流水来源标记「周期」）。服务停机漏掉的周期不回补；改动规则立即生效，无需重启。</div>
+        <table id="recurTable"><thead><tr>
+          <th>名称</th><th>类型</th><th style="text-align:right">金额</th><th>周期</th>
+          <th>下次到期</th><th>状态</th><th style="width:190px"></th>
+        </tr></thead><tbody></tbody></table>
+        <div class="sub" id="recurEmpty" style="display:none;padding:8px 0">暂无规则：点右上「＋ 新增规则」</div>
       </div>
     </section>
 

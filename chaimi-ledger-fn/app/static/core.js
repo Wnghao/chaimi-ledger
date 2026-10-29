@@ -238,8 +238,9 @@ function showPage(p){
   if(p==="list") { loadTx(); loadSumbarList(); }
   if(p==="renqing") loadRenqing();
   if(p==="debts") loadDebts();
+  if(p==="recur") loadRecur();
   if(p==="cal"||p==="stats") refreshStats();
-  if(p==="io") { loadBatches(); expInitRange(); }
+  // 导入和导出已迁入设置页（st-sec），数据随 stLoad 刷新
   if(p==="ai"){ loadSumbarAi(); aiToday(); }
   if(p==="settings") stLoad();
 }
