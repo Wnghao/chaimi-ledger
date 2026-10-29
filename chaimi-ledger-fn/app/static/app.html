@@ -360,6 +360,22 @@
       </div>
     </section>
 
+    <!-- ===== 周期记账（独立页，规则 CRUD 见 /api/recurrences） ===== -->
+    <section class="page" id="tab-recur">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+          <b>周期记账</b>
+          <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="recurOpen()">＋ 新增规则</button>
+        </div>
+        <div class="sub" style="margin-bottom:8px">房租、订阅、工资等固定收支：到期日由后台自动生成一笔流水（流水来源标记「周期」）。服务停机漏掉的周期不回补；改动规则立即生效，无需重启。</div>
+        <table id="recurTable"><thead><tr>
+          <th>名称</th><th>类型</th><th style="text-align:right">金额</th><th>周期</th>
+          <th>下次到期</th><th>状态</th><th style="width:190px"></th>
+        </tr></thead><tbody></tbody></table>
+        <div class="sub" id="recurEmpty" style="display:none;padding:8px 0">暂无规则：点右上「＋ 新增规则」</div>
+      </div>
+    </section>
+
     <!-- ===== 设置页（与其他菜单一致） ===== -->
     <section class="page" id="tab-settings">
       <div class="st-head">
@@ -564,22 +580,6 @@
             <button class="btn btn-pri" onclick="exportCsv('xlsx')">下载 xlsx</button>
           </span>
         </div>
-      </div>
-    </section>
-
-    <!-- ===== 周期记账（独立页，规则 CRUD 见 /api/recurrences） ===== -->
-    <section class="page" id="tab-recur">
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
-          <b>周期记账</b>
-          <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="recurOpen()">＋ 新增规则</button>
-        </div>
-        <div class="sub" style="margin-bottom:8px">房租、订阅、工资等固定收支：到期日由后台自动生成一笔流水（流水来源标记「周期」）。服务停机漏掉的周期不回补；改动规则立即生效，无需重启。</div>
-        <table id="recurTable"><thead><tr>
-          <th>名称</th><th>类型</th><th style="text-align:right">金额</th><th>周期</th>
-          <th>下次到期</th><th>状态</th><th style="width:190px"></th>
-        </tr></thead><tbody></tbody></table>
-        <div class="sub" id="recurEmpty" style="display:none;padding:8px 0">暂无规则：点右上「＋ 新增规则」</div>
       </div>
     </section>
 
