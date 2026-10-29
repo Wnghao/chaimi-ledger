@@ -1,6 +1,8 @@
 name: Build and Push Docker Image
 
-# 打 v* 标签发布正式版；推 main 或手动触发构建 latest（仅 GHCR）
+# 打 v* 标签发布版本号镜像；推 main 或手动触发刷新 latest
+# Docker Hub 为可选通道：仓库配了 DOCKERHUB_USERNAME / DOCKERHUB_TOKEN 即自动镜像，
+# 没配只推 GHCR（注意：secrets 上下文不能用在 job 级 if / workflow 级 env，故在脚本里判空）
 on:
   push:
     branches: [main]
@@ -13,7 +15,6 @@ concurrency:
 
 env:
   GHCR_IMAGE: ghcr.io/${{ github.repository }}
-  DOCKERHUB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/chaimi-ledger
 
 jobs:
   build-push:
@@ -95,10 +96,10 @@ jobs:
 
       - name: Merge into version + latest tags
         env:
-          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
           REF: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
         run: |
           set -euo pipefail
+          GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           shopt -s nullglob
           sources=()
           for f in "$RUNNER_TEMP"/digests/*.txt; do
@@ -117,14 +118,19 @@ jobs:
           fi
           docker buildx imagetools inspect "${GHCR_IMAGE}:${REF}"
 
-      - name: Mirror to Docker Hub（配置了 secrets 才推）
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+      - name: Mirror to Docker Hub（配置了 secrets 才推，没配静默跳过）
         env:
-          GHCR_IMAGE: ${{ env.GHCR_IMAGE }}
-          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+          if [[ -z "$DH_USER" ]]; then
+            echo "未配置 DOCKERHUB_USERNAME/TOKEN，跳过 Docker Hub 推送"
+            exit 0
+          fi
+          GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          DOCKERHUB_IMAGE="${DH_USER}/chaimi-ledger"
+          echo "$DH_TOKEN" | docker login -u "$DH_USER" --password-stdin
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             docker buildx imagetools create -t "${DOCKERHUB_IMAGE}:${GITHUB_REF_NAME}" "${GHCR_IMAGE}:${GITHUB_REF_NAME}"
             docker buildx imagetools create -t "${DOCKERHUB_IMAGE}:latest" "${GHCR_IMAGE}:latest"
