@@ -66,14 +66,19 @@ function catSkinName(t){   // 分类色系键：沿父链上溯到根（CAT_SKIN
   const chain = catChain(t.category_id);
   return chain[0] || t.parent_category || t.category_name || "";
 }
-function catChip(t){   // 流水行分类徽章：叶子名 + 全路径 tooltip + 根类配色（与 txIcon 同源）
+function catPathOf(id){   // 分类全路径字符串（"餐饮美食 / 三餐 / 晚餐"）；无分类返回 ""
+  return catChain(id).join(" / ");
+}
+function txNameChip(t){   // 流水行名称徽章（分类徽章位）：显示交易名称，配色取该行分类根色，
+  // tooltip 带分类全路径；名称与备注相同（钱迹导入行）时省略——标题已含，不重复展示
+  const label = (t.name || "").slice(0, 40);
+  if(!label || label === (t.note || "").slice(0, 40)) return "";
   const chain = catChain(t.category_id);
-  const leaf = t.category_name || chain[chain.length - 1] || "";
-  if(!leaf) return "";
-  const root = chain[0] || t.parent_category || leaf;
+  const root = chain[0] || t.parent_category || t.category_name || "";
   const skin = CAT_SKIN[root];
   const style = skin ? ` style="color:var(${skin[0]});background:var(${skin[1]})"` : "";
-  return `<span class="tag"${style} title="${esc(chain.length ? chain.join(" / ") : leaf)}">${esc(leaf)}</span>`;
+  const path = catPathOf(t.category_id);
+  return `<span class="tag"${style} title="${path ? "分类：" + esc(path) : ""}">${esc(label)}</span>`;
 }
 let _chartLoading = null;
 function loadChart(){   // Chart.js 按需加载：只有统计页与 AI 图表附件用到，不进首屏

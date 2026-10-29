@@ -205,7 +205,7 @@ function txRow(t, mode){
   else if(pv && t.skip && t._pvSkip) tags.push(`<button class="tag dup-hint" onclick="impSkipRow(${t._pvIdx})">已跳过 · 点此恢复</button>`);
   else if(pv && t.dup_hint) tags.push(`<button class="tag dup-hint" title="${esc(dupHintText(t.dup_hint))}" onclick="impSkipRow(${t._pvIdx})">疑似重复 点击跳过</button>`);
   tags.push(...confTags(t));
-  if(!pv) tags.unshift(catChip(t));   // 流水行：分类徽章置首（副行不再重复显示分类）
+  if(!pv) tags.unshift(txNameChip(t));   // 流水行：名称徽章置首（标题已含 分类·备注）
   const srcTag = t.source && t.source!=="manual" ? `<span class="tag plain tx-src">${t.source}</span>` : "";
   const rcpTag = t.receipt_path ? `<span class="tag plain tx-src" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>` : "";
   // 源栈：jd 在上、小票在下；只有其中一个时单独显示
@@ -223,17 +223,21 @@ function txRow(t, mode){
     const cc2 = td.type==="expense"?"var(--expense)":td.type==="income"?"var(--income)":"var(--transfer)";
     const sign2 = td.type==="expense"?"−":td.type==="income"?"+":"";
     /* 流水行字段全部来自账单/AI 文本，一律 esc() 转义防注入（catHtml 为预构建 HTML 除外） */
-    const head2 = esc((td.name || td.note || "（未命名）").slice(0,40));
+    // 标题：预览 = 名称；流水 = 分类 · 备注（2026-10-29，分类上标题、名称进右侧徽章）
+    const noteTxt = (td.note || td.name || "（未命名）").slice(0, 40);
+    const head2 = pv
+      ? esc((td.name || td.note || "（未命名）").slice(0,40))
+      : (td.category_name ? esc(td.category_name) + " · " : "") + esc(noteTxt);
+    const catPathTitle = td.category_id ? ` title="分类：${esc(catPathOf(td.category_id))}"` : "";
     const l22 = [
       (td.date||"").slice(0,16),
-      (td.note && td.note!==td.name) ? esc(td.note.slice(0,40)) : "",
-      opts.catHtml !== undefined ? opts.catHtml : esc(td.category_name || TYPE_CN[td.type] || ""),
+      opts.catHtml !== undefined ? opts.catHtml : "",
       esc(td.attr_display || (td.tags && td.tags.attribution) || ""),
       esc(td.order_no||""),
       esc(td.account_name||"")
     ].filter(Boolean).join(" · ");
     return `<div class="tx-row"${opts.clickAttr || ""}>${txIcon(td)}
-      <div class="tx-body"><div class="tx-note">${head2}</div>
+      <div class="tx-body"><div class="tx-note"${catPathTitle}>${head2}</div>
       <div class="sub tx-sub">${l22}</div></div>
       <div class="tx-right">
         <div class="tx-amt-row"><div class="tx-amt num" style="color:${cc2}">${sign2}${curSym()}${fmt(td.amount)}</div>${opts.srcStack || ""}</div>
@@ -259,10 +263,10 @@ function txRow(t, mode){
   // 这里在渲染双行卡时把原交易一并缓存，第二行即可正常打开编辑。
   txCache[ro.id] = ro;
   const refundTags = confTags(t);
-  refundTags.unshift(catChip(t));
+  refundTags.unshift(txNameChip(t));
   if(t.receipt_path) refundTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>`);
   const roTags = [];
-  roTags.unshift(catChip(ro));
+  roTags.unshift(txNameChip(ro));
   if(ro.receipt_path) roTags.push(`<span class="tag plain" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(ro.receipt_path)}')">🧾</span>`);
   // 例：原支出 4996 + 退款入账 4996 = 0（已全额抵销），而非 9992
   const net = signed(ro.type, ro.amount) + signed(t.type, t.amount);
