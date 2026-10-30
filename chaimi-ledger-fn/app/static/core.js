@@ -143,8 +143,13 @@ function cfmClose(ok){
 }
 async function api(path, opts){
   const r = await fetch(path.replace(/^\//,""), opts);   // 相对路径,经 <base href> 兼容网关前缀/直连
+  if(r.status===401){ location.href = "login"; throw new Error("请先登录"); }   // 会话过期 → 登录页
   if(!r.ok){ let e="请求失败"; try{ e=(await r.json()).detail||e }catch(_){} throw new Error(e); }
   return r.json();
+}
+async function doLogout(){
+  try{ await fetch("api/logout", {method:"POST"}); }catch(_){}
+  location.href = "login";
 }
 async function apiSend(path, method, body){   // JSON 写操作简写（各模块共用）
   return api(path, {method, headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 from contextlib import asynccontextmanager
 import base64
@@ -27,7 +29,7 @@ from decimal import Decimal, InvalidOperation
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
-                               Response, StreamingResponse)
+                               RedirectResponse, Response, StreamingResponse)
 from pydantic import BaseModel
 
 import ai
@@ -85,9 +87,42 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="柴米记账", lifespan=lifespan)
 
-_AUTH_EXEMPT = ("/healthz",)   # NAS 探活放行；其余（含静态资源，浏览器记凭证后自动携带）一律过门
-# 自带 Bearer Token 鉴权的网关端点：web_auth 门凭 Token 等价放行（status/test 无自带鉴权，仍过 Basic 门）
+_AUTH_EXEMPT = ("/healthz", "/login", "/api/login")   # 探活 + 登录页与登录端点；其余一律过门
+# 自带 Bearer Token 鉴权的网关端点：web_auth 门凭 Token 等价放行（status/test 无自带鉴权，仍过门）
 _BOT_TOKEN_PATHS = ("/api/bot/message", "/api/bot/receipt")
+
+_SESSION_COOKIE = "chaimi_sess"
+_SESSION_TTL = 30 * 86400   # 登录态 30 天
+
+def _session_secret(cfg: dict) -> str:
+    """web_auth.session_key 懒生成并落盘（首次登录时写入 chaimi.conf）：
+    重启/重部署不掉登录态；落盘失败退化为进程内随机密钥（重启需重登）。"""
+    key = str(cfg.get("session_key") or "")
+    if key:
+        return key
+    key = secrets.token_hex(32)
+    full = config.load()
+    full.setdefault("web_auth", {})["session_key"] = key
+    try:
+        config.save(full)
+    except OSError:
+        pass
+    return key
+
+def _session_sign(payload: str, key: str) -> str:
+    return hmac.new(key.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+def _session_ok(cookie_val: str, cfg: dict) -> bool:
+    """会话 token 格式 `<过期unix秒>.<hmac>`：常量时间比签 + 过期校验，无状态（不占库存）。"""
+    if not cookie_val or "." not in cookie_val:
+        return False
+    payload, _, sig = cookie_val.rpartition(".")
+    if not hmac.compare_digest(sig, _session_sign(payload, _session_secret(cfg))):
+        return False
+    try:
+        return float(payload) > time.time()
+    except ValueError:
+        return False
 
 def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
     """Basic Auth 常量时间校验（评估 R-04 中期项，默认关闭，见 README 部署前提）。"""
@@ -108,16 +143,21 @@ def _basic_auth_ok(authorization: str, cfg: dict) -> bool:
 async def web_auth_guard(request: Request, call_next):
     """可选 Web 鉴权门（评估 R-04）：chaimi.conf 的 web_auth.enabled=true 时启用。
     定义于 strip_gateway_prefix 之前 → 作为内层中间件拿到剥完网关前缀的路径。
-    凭证为空视为未配置：拒绝并挑战，强制管理员补齐配置（fail-closed）。
-    网关端点（_BOT_TOKEN_PATHS）凭自带 Bearer Token 等价放行：Token 即该链路的门
-    （到达端点后 _bot_guard 同口径再验），Basic Auth 只管浏览器。"""
+    凭证为空视为未配置：拒绝并跳登录，强制管理员补齐配置（fail-closed）。
+    三种凭据等价放行：会话 Cookie（登录页签发）/ Basic（脚本兼容保留）/
+    网关端点自带 Bearer Token（_BOT_TOKEN_PATHS，到达端点后 _bot_guard 同口径再验）。
+    未登录：浏览器导航 302 → /login（不再弹 Basic 框）；API/静态 401 JSON
+    （刻意不带 WWW-Authenticate，避免浏览器对 XHR 弹原始凭证框）。"""
     cfg = config.load().get("web_auth") or {}
     if cfg.get("enabled") and request.url.path not in _AUTH_EXEMPT:
         auth = request.headers.get("authorization") or ""
-        if not _basic_auth_ok(auth, cfg) and not (
+        sess = request.cookies.get(_SESSION_COOKIE) or ""
+        if not (_basic_auth_ok(auth, cfg) or _session_ok(sess, cfg)) and not (
                 request.url.path in _BOT_TOKEN_PATHS and _bot_token_ok(auth)):
+            if "text/html" in (request.headers.get("accept") or ""):
+                return RedirectResponse(f"/login?next={quote(request.url.path, safe='/')}",
+                                        status_code=302)
             return Response(content=b'{"detail":"unauthorized"}', status_code=401,
-                            headers={"WWW-Authenticate": 'Basic realm="chaimi-ledger"'},
                             media_type="application/json")
     return await call_next(request)
 
@@ -232,6 +272,33 @@ def index():
 def home():
     """登录/用户选择页：主应用检测到无当前用户（首次/缓存失效）时跳转至此。"""
     return _page("home.html")
+
+@app.get("/login", include_in_schema=False)
+def login_page():
+    return _page("login.html")
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+@app.post("/api/login")
+def login(body: LoginIn, response: Response):
+    """登录页签发会话 Cookie（HttpOnly+SameSite=Lax，30 天）。凭证空 = 未配置，恒拒。"""
+    cfg = config.load().get("web_auth") or {}
+    cfg_user, cfg_pwd = str(cfg.get("username") or ""), str(cfg.get("password") or "")
+    if not (cfg.get("enabled") and cfg_user and cfg_pwd):
+        raise HTTPException(400, "登录未启用或凭证未配置")
+    if not (_ct_eq(body.username, cfg_user) and _ct_eq(body.password, cfg_pwd)):
+        raise HTTPException(401, "用户名或密码错误")
+    exp = str(int(time.time()) + _SESSION_TTL)
+    response.set_cookie(_SESSION_COOKIE, f"{exp}.{_session_sign(exp, _session_secret(cfg))}",
+                        max_age=_SESSION_TTL, httponly=True, samesite="lax", path="/")
+    return {"ok": True}
+
+@app.post("/api/logout")
+def logout(response: Response):
+    response.delete_cookie(_SESSION_COOKIE, path="/")
+    return {"ok": True}
 
 def _no_cache_file(base: Path, name: str) -> FileResponse:
     """目录内文件下发（/static 与 /images 共用）：名校验 + 404 + 禁缓存。"""
