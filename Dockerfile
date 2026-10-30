@@ -10,7 +10,8 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     TRIM_PKGVAR=/data \
     CHAIMI_DB=/data/chaimi.db \
-    CHAIMI_CONF=/data/chaimi.conf
+    CHAIMI_CONF=/data/chaimi.conf \
+    CHAIMI_BOT_BIND=off
 
 # Pillow/pycryptodome 均有 manylinux wheel，无需编译链
 COPY chaimi-ledger-fn/app/src/requirements.txt /tmp/requirements.txt
