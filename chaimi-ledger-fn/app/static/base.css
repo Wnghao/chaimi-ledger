@@ -471,3 +471,12 @@ body[data-accent="gray"]{--primary:var(--m-gray);--primary-2:var(--m-gray-bd);--
 .accent-pop .accent-dot{width:24px;height:24px}
 .accent-cur{font-size:12px;color:var(--fg);font-weight:600;margin-left:4px}
 .side-theme-btn{position:relative}
+
+/* 主题色 popover：fixed 定位（JS 按触发按钮坐标计算），任何容器都裁不到它 */
+.accent-pop{position:fixed;top:10px;right:12px;left:auto;bottom:auto;z-index:95;min-width:210px}
+/* 移动端：顶栏入口（桌面隐藏，桌面用侧栏底部的按钮） */
+.gbar-accent{display:none}
+@media(max-width:768px){
+  .gbar .gbar-accent{display:inline-flex}
+  body[data-page="renqing"] .gbar-accent, body[data-page="io"] .gbar-accent, body[data-page="settings"] .gbar-accent{display:inline-flex}
+}
