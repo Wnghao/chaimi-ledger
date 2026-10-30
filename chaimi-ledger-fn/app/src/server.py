@@ -87,8 +87,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="柴米记账", lifespan=lifespan)
 
-_AUTH_EXEMPT = ("/healthz", "/login", "/api/login",
-                "/static/base.css", "/images/login-cow.png")   # 探活 + 登录页自身及其样式/图标；其余一律过门
+_AUTH_EXEMPT = ("/healthz", "/login", "/api/login", "/api/app/rules",
+                "/static/base.css", "/images/login-cow.png")   # 探活 + 登录页自身及其样式/图标 + 规则分发（公开纯数据）；其余一律过门
 # 自带 Bearer Token 鉴权的网关端点：web_auth 门凭 Token 等价放行（status/test 无自带鉴权，仍过门）
 _BOT_TOKEN_PATHS = ("/api/bot/message", "/api/bot/receipt", "/api/app/record")
 
