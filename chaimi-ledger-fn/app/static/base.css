@@ -480,3 +480,35 @@ body[data-accent="gray"]{--primary:var(--m-gray);--primary-2:var(--m-gray-bd);--
   .gbar .gbar-accent{display:inline-flex}
   body[data-page="renqing"] .gbar-accent, body[data-page="io"] .gbar-accent, body[data-page="settings"] .gbar-accent{display:inline-flex}
 }
+
+/* 「原色」= 批次 A 暖化前的原始配色（冷白底/冷阴影/绿热力），浩要可切换 */
+[data-warm="off"]{
+  --bg:#F7F8FB; --bg-2:#EDEFF5; --fg:#1F2433; --muted:#6E7686;
+  --border:#E8EBF3; --chip:#F1F3F8; --hover:#F4F6FB;
+  --mask:rgba(31,36,51,.45); --sb-thumb:rgba(31,36,51,.25); --sb-thumb-hover:rgba(31,36,51,.45);
+  --shadow:0 1px 2px rgba(31,36,51,.04), 0 4px 16px rgba(31,36,51,.05);
+  --shadow-md:0 2px 8px rgba(31,36,51,.06), 0 8px 24px rgba(31,36,51,.08);
+  --shadow-lg:0 4px 16px rgba(31,36,51,.08), 0 16px 48px rgba(31,36,51,.12);
+  --cal-heat-1:#E6F4EE; --cal-heat-2:#C8E5DA; --cal-heat-3:#9BD0BC; --cal-heat-4:#5DBF8A;
+}
+[data-theme="dark"][data-warm="off"]{
+  --bg:#0F172A; --bg-2:#1E293B; --card:#1A2236; --fg:#E8ECF4; --muted:#8A93A8;
+  --border:rgba(255,255,255,.04); --hover:rgba(255,255,255,.05); --chip:#252C40;
+  --cal-heat-1:#1E3A2E; --cal-heat-2:#2E5042; --cal-heat-3:#46755E; --cal-heat-4:#6FCBA0;
+}
+/* gbar 明暗按钮：仅移动端显示（桌面用侧栏底部的） */
+.gbar-theme{display:none}
+@media(max-width:768px){
+  .gbar .gbar-theme{display:inline-flex}
+  body[data-page="renqing"] .gbar-theme, body[data-page="io"] .gbar-theme, body[data-page="settings"] .gbar-theme{display:inline-flex}
+}
+/* popover 头部：标题 + 暖/原 切换 */
+.accent-pop-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.accent-pop-head .accent-pop-title{margin-bottom:0}
+.warm-toggle{display:inline-flex;background:var(--chip);border-radius:999px;padding:2px}
+.warm-toggle button{border:none;background:none;font-size:11px;padding:3px 10px;border-radius:999px;
+  color:var(--muted);cursor:pointer;font-family:inherit;transition:background .15s,color .15s}
+.warm-toggle button:last-child{margin-left:2px}
+body[data-warm="on"] .warm-toggle #warmOn,
+body[data-warm="off"] .warm-toggle #warmOff{background:var(--card);color:var(--fg);font-weight:600;
+  box-shadow:0 1px 3px rgba(122,84,54,.18)}

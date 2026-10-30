@@ -20,7 +20,13 @@
 </svg>
 <div id="msg" class="msg"></div>
   <div id="accentPop" class="accent-pop" onclick="event.stopPropagation()" style="display:none">
-    <div class="accent-pop-title">主题色</div>
+    <div class="accent-pop-head">
+      <span class="accent-pop-title">主题色</span>
+      <span class="warm-toggle">
+        <button id="warmOn" onclick="setWarm('on');renderWarmToggle()">暖色</button>
+        <button id="warmOff" onclick="setWarm('off');renderWarmToggle()">原色</button>
+      </span>
+    </div>
     <div id="accentPickerPop" class="accent-row"></div>
     <button class="btn btn-pri" id="accentDemo" style="height:34px;font-size:12.5px" onclick="event.stopPropagation()">示例按钮</button>
   </div>
@@ -56,6 +62,7 @@
       <div class="gbar-inner">
         <div class="gbar-row">
           <button class="icon-btn gbar-accent" onclick="accentPopToggle(event)" title="主题色"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r="1.2" fill="currentColor" stroke="none"/></svg></button>
+          <button class="icon-btn gbar-theme" onclick="toggleTheme()" title="切换明暗"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></button>
           <button class="icon-btn gbar-menu" onclick="toggleSidebar()" title="菜单"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="19" r="1.9"/></svg></button>
           <button class="gb-user" id="gbUser" style="display:none" onclick="goUserHome()" title="选择用户"></button>
           <span class="spacer"></span>
