@@ -14,6 +14,12 @@ const today = () => new Date().toISOString().slice(0,10);
 document.body.dataset.accent = (function(){ try{ return localStorage.getItem("chaimi_accent") || "blue"; }catch(_){ return "blue"; } })();
 document.body.dataset.warm = (function(){ try{ return localStorage.getItem("chaimi_warm") || "on"; }catch(_){ return "on"; } })();
 function setWarm(v){ document.body.dataset.warm = v; try{ localStorage.setItem("chaimi_warm", v); }catch(_){} }
+function syncWarmToggle(){
+  const wt = document.body.dataset.warm || "on";
+  const on = document.querySelector("#warmOn"), off = document.querySelector("#warmOff");
+  if(on){ on.style.background = wt === "on" ? "var(--card)" : "none"; on.style.color = wt === "on" ? "var(--fg)" : "var(--muted)"; }
+  if(off){ off.style.background = wt === "off" ? "var(--card)" : "none"; off.style.color = wt === "off" ? "var(--fg)" : "var(--muted)"; }
+}
 function renderAccentDots(){
   const ACCENTS = [["blue","海蓝"],["pink","樱粉"],["green","豆绿"],["purple","雾紫"],["peach","蜜桃"],["teal","青瓷"],["gray","暖灰"]];
   const box = document.querySelector("#accentPickerPop");
@@ -36,12 +42,7 @@ function accentPopToggle(e){
   pop.style.display = show ? "block" : "none";
   if(show){
     renderAccentDots(); refreshAccentDemo();
-    const wt = document.body.dataset.warm || "on";
-    const on = document.querySelector("#warmOn"), off = document.querySelector("#warmOff");
-    if(on) on.style.background = wt === "on" ? "var(--card)" : "none";
-    if(off) off.style.background = wt === "off" ? "var(--card)" : "none";
-    if(on) on.style.color = wt === "on" ? "var(--fg)" : "var(--muted)";
-    if(off) off.style.color = wt === "off" ? "var(--fg)" : "var(--muted)";
+    syncWarmToggle();
   }
 }
 document.addEventListener("click", e => {
