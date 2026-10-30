@@ -1977,6 +1977,13 @@ def app_record(body: AppRecordIn, request: Request):
     if cat_id is None:
         cat_id = bot_core.resolve_category(
             ledger, tx_type, category or merchant or pm or body.channel)
+    if cat_id is None and category:
+        # App 确认框的常用分类含子级（早餐/午餐 是 餐饮美食>三餐 的三级），
+        # resolve_category 只匹配一级 —— 这里对全部层级做精确名兜底
+        row = conn().execute(
+            "SELECT id FROM categories WHERE ledger_id=? AND name=? AND type=? LIMIT 1",
+            (ledger, category, tx_type)).fetchone()
+        cat_id = row["id"] if row else None
 
     # 账户：pay_method 与账户名双向包含（"零钱"→微信零钱 等）；匹配不到留空
     account_id = None
