@@ -12,6 +12,32 @@ const fmtI = c => { const n = Math.round(c/100); return n.toLocaleString("en-US"
 const today = () => new Date().toISOString().slice(0,10);
 /* 主题色：启动即应用到 body（默认 blue） */
 document.body.dataset.accent = (function(){ try{ return localStorage.getItem("chaimi_accent") || "blue"; }catch(_){ return "blue"; } })();
+function renderAccentDots(){
+  const ACCENTS = [["blue","海蓝"],["pink","樱粉"],["green","豆绿"],["purple","雾紫"],["peach","蜜桃"],["teal","青瓷"],["gray","暖灰"]];
+  const box = document.querySelector("#accentPickerPop");
+  if(!box) return;
+  const cur = document.body.dataset.accent || "blue";
+  const names = Object.fromEntries(ACCENTS);
+  box.innerHTML = ACCENTS.map(([k, cn]) =>
+    `<button class="accent-dot ${k}${k===cur?" on":""}" title="${cn}" onclick="setAccent('${k}');renderAccentDots();refreshAccentDemo()"></button>`).join("")
+    + `<span class="accent-cur">${names[cur] || cur}</span>`;
+}
+function refreshAccentDemo(){
+  const d = document.querySelector("#accentDemo");
+  if(d) d.textContent = document.body.dataset.accent === "blue" ? "海蓝" : ({"pink":"樱粉","green":"豆绿","purple":"雾紫","peach":"蜜桃","teal":"青瓷","gray":"暖灰"}[document.body.dataset.accent] || "");
+}
+function accentPopToggle(e){
+  e && e.stopPropagation();
+  const pop = document.querySelector("#accentPop");
+  if(!pop) return;
+  const show = pop.style.display === "none";
+  pop.style.display = show ? "block" : "none";
+  if(show){ renderAccentDots(); refreshAccentDemo(); }
+}
+document.addEventListener("click", e => {
+  const pop = document.querySelector("#accentPop");
+  if(pop && pop.style.display === "block" && !pop.contains(e.target)) pop.style.display = "none";
+});
 function setAccent(a){ document.body.dataset.accent = a; try{ localStorage.setItem("chaimi_accent", a); }catch(_){} }
 const thisMonth = () => new Date().toISOString().slice(0,7);
 /* 退款对「吸收」过滤：已被退款行引用的原交易 id 集合（流水/详情共用） */

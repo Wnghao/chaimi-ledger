@@ -462,3 +462,12 @@ body[data-accent="gray"]{--primary:var(--m-gray);--primary-2:var(--m-gray-bd);--
 
 /* 弹窗遮罩加磨砂玻璃（现代感；--mask 透明度相应调浅） */
 .modal-mask{backdrop-filter:blur(5px) saturate(1.1);-webkit-backdrop-filter:blur(5px) saturate(1.1)}
+
+/* 顶栏主题色 popover */
+.accent-pop{position:absolute;top:44px;right:0;background:var(--card);border:1px solid var(--border);
+  border-radius:14px;box-shadow:var(--shadow-md);padding:14px 16px;z-index:80;min-width:190px}
+.accent-pop-title{font-size:11px;color:var(--muted);letter-spacing:.5px;margin-bottom:10px;font-weight:600}
+.accent-pop .accent-row{flex-wrap:wrap;gap:9px}
+.accent-pop .accent-dot{width:24px;height:24px}
+.accent-cur{font-size:12px;color:var(--fg);font-weight:600;margin-left:4px}
+.side-theme-btn{position:relative}
