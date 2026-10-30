@@ -1913,6 +1913,7 @@ class AppRecordIn(BaseModel):
 
 _APP_RECORD_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$")
 _APP_RECORD_PID = re.compile(r"^[A-Za-z0-9_\-]{6,64}$")
+RULES_FEED_PATH = Path("/data/rules.json")   # crontab 从 GitHub 同步的规则分发文件
 
 @app.post("/api/app/record")
 def app_record(body: AppRecordIn, request: Request):
@@ -1993,6 +1994,18 @@ def app_record(body: AppRecordIn, request: Request):
     return {"id": tid, "duplicate": False,
             "category_resolved": cat_id is not None,
             "account_resolved": account_id is not None}
+
+@app.get("/api/app/rules")
+def app_rules():
+    """云端规则分发（公开只读，纯数据无敏感字段）。
+
+    文件由宿主机 crontab 从 GitHub 仓库 Wnghao/bkbridge-rules 定时同步到
+    data/rules.json —— GitHub 系 CDN（jsDelivr/ghfast/raw）在国内手机上
+    经常不可达，家里设备靠本端点（局域网直连）拿规则。"""
+    f = RULES_FEED_PATH
+    if not f.exists() or f.stat().st_size < 10:
+        raise HTTPException(404, "规则文件未同步（等待 crontab 拉取）")
+    return FileResponse(f, media_type="application/json")
 
 @app.post("/api/bot/receipt")
 async def bot_receipt(request: Request, file: UploadFile = File(...), user: str = "gateway"):
