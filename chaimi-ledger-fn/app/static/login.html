@@ -79,10 +79,12 @@ function toast(t){
   el.textContent = t; el.classList.add("on");
   clearTimeout(el._t); el._t = setTimeout(()=>el.classList.remove("on"), 2400);
 }
-/* next 只接受站内路径（必须以 / 开头且非 //，防开放跳转）；坏值回落首页 */
+/* next 只接受站内路径（必须以 / 开头且非 //，防开放跳转）；坏值回落首页。
+   跳转用 base 相对路径（去首部 /）：经网关前缀（/app/chaimi-ledger/）访问时
+   <base href> 已注入前缀，绝对 "/" 会跳出应用。 */
 function safeNext(){
   const n = new URLSearchParams(location.search).get("next") || "/";
-  return n.startsWith("/") && !n.startsWith("//") ? n : "/";
+  return n.startsWith("/") && !n.startsWith("//") ? n.slice(1) || "./" : "./";
 }
 async function doLogin(ev){
   ev.preventDefault();
