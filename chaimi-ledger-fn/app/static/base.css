@@ -1,28 +1,39 @@
 :root{
   /* ===== 全局中性 ===== */
-  --bg:#F7F8FB;          /* 整页底色——比纯白更柔和 */
-  --bg-2:#EDEFF5;        /* 二级底色 */
+  --bg:#FAF6F0;          /* 整页底色——暖米白，像信纸而不是后台系统 */
+  --bg-2:#F2EBE2;        /* 二级底色 */
   --card:#FFFFFF;        /* 卡片底色 */
-  --fg:#1F2433;          /* 主文字——深蓝灰，4.7:1 对比度 */
-  --muted:#6E7686;
-  --border:#E8EBF3;      /* 通用边框 */
-  --chip:#F1F3F8;        /* 标签/小元素底 */
-  --hover:#F4F6FB;       /* hover 高亮 */
-  --mask:rgba(31,36,51,.45);   /* 弹窗遮罩（modal-mask 与退款下拉共用） */
-  --sb-thumb:rgba(31,36,51,.25);        /* 滚动条滑块（悬浮式，仅 hover 提亮） */
-  --sb-thumb-hover:rgba(31,36,51,.45);
+  --fg:#26201C;          /* 主文字——暖深灰，与暖底同色温 */
+  --muted:#7B6F64;
+  --border:#EFE7DE;      /* 通用边框 */
+  --chip:#F5EEE6;        /* 标签/小元素底 */
+  --hover:#F7F0E8;       /* hover 高亮 */
+  --mask:rgba(38,32,28,.45);   /* 弹窗遮罩（modal-mask 与退款下拉共用） */
+  --sb-thumb:rgba(38,32,28,.22);        /* 滚动条滑块（悬浮式，仅 hover 提亮） */
+  --sb-thumb-hover:rgba(38,32,28,.40);
   color-scheme:light;
 
   /* ===== 三级阴影 ===== */
-  --shadow:0 1px 2px rgba(31,36,51,.04), 0 4px 16px rgba(31,36,51,.05);
-  --shadow-md:0 2px 8px rgba(31,36,51,.06), 0 8px 24px rgba(31,36,51,.08);
-  --shadow-lg:0 4px 16px rgba(31,36,51,.08), 0 16px 48px rgba(31,36,51,.12);
+  --shadow:0 1px 2px rgba(122,84,54,.05), 0 4px 16px rgba(122,84,54,.07);
+  --shadow-md:0 2px 8px rgba(122,84,54,.07), 0 8px 24px rgba(122,84,54,.10);
+  --shadow-lg:0 4px 16px rgba(122,84,54,.10), 0 16px 48px rgba(122,84,54,.14);
 
   /* ===== 圆角（大圆角，整体更柔和） ===== */
   --radius:18px;          /* 卡片 */
   --radius-lg:22px;        /* 容器/弹窗 */
   --radius-sm:12px;        /* 按钮/输入框 */
   --radius-pill:999px;     /* chip/avatar 全圆 */
+
+  /* ===== 字号阶梯（5 档，替代此前 10/10.5/11/11.5/12/12.5/13/13.5/14 的碎片）=====
+     用法：辅助信息 fs-xs / 正文 fs-base / 强调 fs-md / 小标题 fs-lg / 页标题 fs-xl
+     标题与正文比值 ≥2.5×，保证"扫一眼能找到重点" */
+  --fs-2xs:11px;   /* 角标/极小注 */
+  --fs-xs:12px;    /* 辅助信息、表头、时间 */
+  --fs-sm:13px;    /* 紧凑正文（表格行、卡片副标题） */
+  --fs-base:15px;  /* 正文基准（原 14px，暖色大字号更舒服） */
+  --fs-md:16px;    /* 强调正文、列表主标题 */
+  --fs-lg:20px;    /* 卡片/区块标题 */
+  --fs-xl:28px;    /* 页面主标题、大金额 */
 
   /* ===== 马卡龙 8 色系（每个功能模块一个独立色相）=====
      每系 5 级：bg50(填充) → bg100(底) → border(边) → primary(图标/按钮) → fg(文字)
@@ -52,19 +63,19 @@
   --transfer:#787A88;      /* 转账——莫兰迪灰 */
 
   /* ===== 日历热力（薄荷蓝绿 4 档，与 cal 图标 #5DBF8A 同源，4 档 lightness 阶梯） ===== */
-  --cal-heat-1:#E6F4EE;        /* 极淡薄荷（最低支出，与 cal 图标同源） */
-  --cal-heat-2:#C8E5DA;        /* 淡薄荷（低支出） */
-  --cal-heat-3:#9BD0BC;        /* 中薄荷（中支出） */
-  --cal-heat-4:#5DBF8A;        /* 主薄荷绿（最高支出，= cal 图标色） */
+  --cal-heat-1:#FDF1E5;        /* 极淡薄荷（最低支出，与 cal 图标同源） */
+  --cal-heat-2:#F9D6B4;        /* 淡薄荷（低支出） */
+  --cal-heat-3:#EFA277;        /* 中薄荷（中支出） */
+  --cal-heat-4:#D9704F;        /* 主薄荷绿（最高支出，= cal 图标色） */
 
   --cal-amt-e1:#D0404F; --cal-amt-i1:#23855A;
   --cal-amt-e2:#A32A38; --cal-amt-i2:#14603C;
   --cal-amt-e3:#7A1F2B; --cal-amt-i3:#0B3D27;
 }
 [data-theme="dark"]{
-  --bg:#0F172A; --bg-2:#1E293B; --card:#1A2236; --fg:#E8ECF4; --muted:#8A93A8;
-  --border:rgba(255,255,255,.04); --hover:rgba(255,255,255,.05);
-  --chip:#252C40; --pending-bg:rgba(217,162,80,.16);
+  --bg:#171210; --bg-2:#211A16; --card:#1F1915; --fg:#F0E7DF; --muted:#A2938A;
+  --border:rgba(255,240,228,.06); --hover:rgba(255,246,238,.06);
+  --chip:#2B221D; --pending-bg:rgba(217,162,80,.16);
   /* 滚动条：深底上用低透明度白，弱化存在感，hover 才提亮 */
   --sb-thumb:rgba(255,255,255,.16); --sb-thumb-hover:rgba(255,255,255,.32);
   color-scheme:dark;
@@ -87,10 +98,10 @@
   --expense:#E87585;
   --income:#7ACFA0;
   /* 日历热力：深色模式薄荷蓝绿 4 档（与 cal 图标同源） */
-  --cal-heat-1:#1E3A2E;        /* 极深薄荷（最低支出） */
-  --cal-heat-2:#2E5042;        /* 深薄荷（低支出） */
-  --cal-heat-3:#46755E;        /* 中薄荷（中支出） */
-  --cal-heat-4:#6FCBA0;        /* 亮薄荷绿（最高支出，深底跳出来） */
+  --cal-heat-1:#3A2418;        /* 极深薄荷（最低支出） */
+  --cal-heat-2:#5A3623;        /* 深薄荷（低支出） */
+  --cal-heat-3:#8A4E33;        /* 中薄荷（中支出） */
+  --cal-heat-4:#D98A63;        /* 亮薄荷绿（最高支出，深底跳出来） */
   /* 日历金额字色（深色：h1·h2 深底用亮色原色；h3 中等亮度底提亮；h4 亮薄荷底反转为深字） */
   --cal-amt-e1:#E87585; --cal-amt-i1:#7ACFA0;
   --cal-amt-e2:#FFC9D0; --cal-amt-i2:#B9F0D2;
@@ -101,7 +112,7 @@
   --shadow-lg:0 4px 16px rgba(0,0,0,.50), 0 16px 48px rgba(0,0,0,.45);
 }
 *{box-sizing:border-box;margin:0}
-body{background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:14px;transition:background .2s,color .2s;font-variant-numeric:tabular-nums}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;font-size:var(--fs-base);transition:background .2s,color .2s;font-variant-numeric:tabular-nums}
 /* 焦点框全局不显示（输入框另有 :focus 描边，见下） */
 *:focus{outline:none}
 
@@ -183,7 +194,7 @@ body{overflow:hidden}
   padding:6px 14px 6px 6px;border-radius:999px;transition:background .15s}
 .gb-user:hover{background:var(--hover)}
 .gb-user b{font-weight:600;line-height:1}
-.gb-user .gw{color:var(--muted);font-size:13.5px;line-height:1}
+.gb-user .gw{color:var(--muted);font-size:14px;line-height:1}
 .gb-user img{width:26px;height:26px;border-radius:9px;flex:none}
 @media(max-width:680px){.gb-user .gw{display:none}.gb-user{padding:6px 10px 6px 6px}}
 
@@ -233,6 +244,12 @@ body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="set
 /* 深色模式：btn-pri hover 改用 bd（更深的中等亮度），避免淡蓝底白字对比度不足 */
 [data-theme="dark"] .btn-pri:hover{background:var(--primary-2)}
 .btn-ghost{background:none;border:1px solid var(--border);color:var(--fg)}
+/* 危险操作（删除/清空/解绑）：全站统一红色语义，不依赖所在容器——
+   此前只有 .st-sec 内生效，导致列表里的「删」是灰色 ghost，看不出危险性 */
+.btn.danger{background:none;border:1px solid var(--expense);color:var(--expense)}
+.btn.danger:hover{background:rgba(208,64,79,.09);opacity:1}
+[data-theme="dark"] .btn.danger{border-color:rgba(232,117,133,.55);color:#E87585}
+[data-theme="dark"] .btn.danger:hover{background:rgba(232,117,133,.14)}
 .btn:hover{opacity:.85}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
@@ -326,7 +343,7 @@ body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="set
 .pv-list .tx-row>.tx-right>.tx-tags{flex-shrink:0;max-width:130px;overflow:hidden;align-self:flex-end}
 .pv-list .tx-row>.tx-right>.tx-tags .tag{display:inline-block;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pv-list .tx-row>.tx-right>.tx-amt-row{flex-shrink:0;min-width:55px}
-.pv-list .tx-row>.tx-right>.tx-amt-row>.tx-src{font-size:10.5px;padding:1px 6px;line-height:1.2}
+.pv-list .tx-row>.tx-right>.tx-amt-row>.tx-src{font-size:11px;padding:1px 6px;line-height:1.2}
 .pv-list .tx-row>.tx-right>.tx-amt-row>.tx-src-stack{display:flex;flex-direction:column;align-items:flex-start;gap:3px}
 /* 导入批次：手机端表格转卡片布局 */
 @media(max-width:768px){

@@ -46,7 +46,7 @@ async function loadDebts(){
         <button class="btn btn-ghost dbt-btn" onclick="repaysOpen(${d.id}, '${qEsc(d.person)}', '${d.direction}')">明细</button>
         ${d.status === "open" ? `<button class="btn dbt-btn dbt-repay" onclick="repayOpen(${d.id}, '${qEsc(d.person)}', '${d.direction}', ${remaining})">还款</button>` : ""}
         <button class="btn btn-ghost dbt-btn" onclick="debtEdit(${d.id})">编辑</button>
-        <button class="btn btn-ghost dbt-btn" onclick="debtDel(${d.id}, '${qEsc(d.person)}')">删</button>
+        <button class="btn danger dbt-btn" onclick="debtDel(${d.id}, '${qEsc(d.person)}')">删</button>
       </td></tr>`;
   }).join("");
   $("#debtEmpty").style.display = rows.length ? "none" : "block";

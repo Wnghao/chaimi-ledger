@@ -676,7 +676,7 @@ async function loadRecur(){
           <input type="checkbox" ${r.enabled ? "checked" : ""} onchange="recurToggle(${r.id}, this.checked)"><i></i></label>
         <button class="btn btn-ghost dbt-btn" onclick="recurRun(${r.id})">记一期</button>
         <button class="btn btn-ghost dbt-btn" onclick="recurEdit(${r.id})">编辑</button>
-        <button class="btn btn-ghost dbt-btn" onclick="recurDel(${r.id}, '${qEsc(r.name)}')">删</button>
+        <button class="btn danger dbt-btn" onclick="recurDel(${r.id}, '${qEsc(r.name)}')">删</button>
       </td></tr>`;
   }).join("");
   $("#recurEmpty").style.display = rows.length ? "none" : "block";
