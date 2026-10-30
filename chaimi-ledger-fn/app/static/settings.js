@@ -1,6 +1,6 @@
 /* ===== 设置层 ===== */
 function stLoad(){
-  loadCfg();loadLedgers();loadCatMgr();stAccs();stAttrs();loadBks();loadBkCfg();loadWdCfg();loadBotCfg();loadBatches();expInitRange();
+  renderAccentPicker();loadCfg();loadLedgers();loadCatMgr();stAccs();stAttrs();loadBks();loadBkCfg();loadWdCfg();loadBotCfg();loadBatches();expInitRange();
 }
 function stTab(name){
   document.querySelectorAll("#stTabs button").forEach(b=>b.classList.toggle("on", b.dataset.s===name));
@@ -360,6 +360,14 @@ async function loadBks(){
   }).join("") || '<tr><td colspan="6" class="sub">暂无备份</td></tr>';
 }
 function dlLogs(){location.href="api/logs/download";}
+const ACCENTS = [["blue","海蓝"],["pink","樱粉"],["green","豆绿"],["purple","雾紫"],["peach","蜜桃"],["teal","青瓷"],["gray","暖灰"]];
+function renderAccentPicker(){
+  const box = $("#accentPicker");
+  if(!box) return;
+  const cur = document.body.dataset.accent || "blue";
+  box.innerHTML = ACCENTS.map(([k, cn]) =>
+    `<button class="accent-dot ${k}${k===cur?" on":""}" title="${cn}" onclick="setAccent('${k}');renderAccentPicker()"></button>`).join("");
+}
 async function loadBkCfg(){
   const c = await getCfg();
   $("#bk_enabled").checked=!!c.backup.enabled;

@@ -429,6 +429,11 @@
 <section class="st-sec" data-s="book">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+          <h2 class="st-h2 row">主题色</h2>
+          <div id="accentPicker" class="accent-row"></div>
+        </div>
+        <div class="sub" style="margin-bottom:12px">选一个顺眼的主色，按钮、开关、高亮会跟着换；明暗主题都适配。</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
           <h2 class="st-h2 row">用户设置</h2>
           <button class="btn btn-ghost" id="userEditBtn" style="padding:4px 12px;font-size:12px;flex:0 0 auto" onclick="userEdit.toggle()">编辑</button>
         </div>
@@ -728,35 +733,58 @@
 
 <!-- 周期记账：新增/编辑规则 -->
 <div class="modal-mask" id="recurMask" onclick="if(event.target===this)recurClose()" style="display:none">
-  <div class="modal" style="max-width:420px;padding:20px">
-    <div class="modal-head" style="margin:-20px -20px 14px;padding:14px 20px;border-bottom:1px solid var(--line, #eee)">
+  <div class="modal modal-form">
+    <div class="modal-head">
       <b id="recurTitle">新增周期规则</b>
       <button class="icon-btn" onclick="recurClose()" title="关闭">✕</button>
     </div>
-    <label>名称</label><input id="rc_name" placeholder="房租 / 话费 / 工资">
-    <div class="row">
-      <div><label>类型</label>
-        <select id="rc_type" onchange="recurOnType()"><option value="expense">支出</option><option value="income">收入</option><option value="transfer">转账</option></select></div>
-      <div><label>金额（元）</label><input id="rc_amt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+
+    <div class="modal-body form-body">
+      <div class="form-sec">
+        <div class="form-sec-title">基本信息</div>
+        <div class="form-grid">
+          <div class="field full"><label>名称</label><input id="rc_name" placeholder="房租 / 话费 / 工资"></div>
+          <div class="field"><label>类型</label>
+            <select id="rc_type" onchange="recurOnType()"><option value="expense">支出</option><option value="income">收入</option><option value="transfer">转账</option></select></div>
+          <div class="field"><label>金额（元）</label><input id="rc_amt" type="number" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+        </div>
+      </div>
+
+      <div class="form-sec">
+        <div class="form-sec-title">周期</div>
+        <div class="form-grid">
+          <div class="field"><label>重复</label>
+            <select id="rc_freq" onchange="recurOnFreq()"><option value="monthly">每月</option><option value="weekly">每周</option><option value="daily">每 N 天</option></select></div>
+          <div class="field"><label>间隔 N</label><input id="rc_interval" type="number" min="1" step="1" value="1"></div>
+          <div class="field" id="rc_weekday_wrap" style="display:none"><label>星期</label>
+            <select id="rc_weekday"><option value="0">周一</option><option value="1">周二</option><option value="2">周三</option><option value="3">周四</option><option value="4">周五</option><option value="5">周六</option><option value="6">周日</option></select></div>
+          <div class="field" id="rc_dom_wrap"><label>每月几号</label><input id="rc_dom" type="number" min="1" max="31" step="1" value="1" placeholder="31=月末"></div>
+        </div>
+        <div class="next-hint" id="rc_next_hint"></div>
+      </div>
+
+      <div class="form-sec">
+        <div class="form-sec-title">分类与账户</div>
+        <div class="form-grid">
+          <div class="field" id="rc_cat_wrap"><label>分类</label><select id="rc_cat"></select></div>
+          <div class="field" id="rc_acc_wrap"><label>账户</label><select id="rc_acc"></select></div>
+          <div class="field" id="rc_to_wrap" style="display:none"><label>收款账户</label><select id="rc_to"></select></div>
+        </div>
+      </div>
+
+      <div class="form-sec">
+        <div class="form-sec-title">其他</div>
+        <div class="form-grid">
+          <div class="field"><label id="rc_start_lb">到日期（可选）</label>
+            <input id="rc_start" type="date">
+            <div class="hint" id="rc_start_hint">到这天之后不再自动记账；留空表示一直记下去</div>
+          </div>
+          <div class="field"><label>备注（可选）</label><input id="rc_note" placeholder="给未来的自己留句话"></div>
+        </div>
+      </div>
     </div>
-    <div class="row">
-      <div><label>周期</label>
-        <select id="rc_freq" onchange="recurOnFreq()"><option value="monthly">每月</option><option value="weekly">每周</option><option value="daily">每 N 天</option></select></div>
-      <div><label>间隔 N</label><input id="rc_interval" type="number" min="1" step="1" value="1"></div>
-      <div id="rc_weekday_wrap" style="display:none"><label>星期</label>
-        <select id="rc_weekday"><option value="0">周一</option><option value="1">周二</option><option value="2">周三</option><option value="3">周四</option><option value="4">周五</option><option value="5">周六</option><option value="6">周日</option></select></div>
-      <div id="rc_dom_wrap"><label>每月几号</label><input id="rc_dom" type="number" min="1" max="31" step="1" value="1" placeholder="31=月末"></div>
-    </div>
-    <div class="row">
-      <div id="rc_cat_wrap"><label>分类</label><select id="rc_cat"></select></div>
-      <div id="rc_acc_wrap"><label>账户</label><select id="rc_acc"></select></div>
-      <div id="rc_to_wrap" style="display:none"><label>收款账户</label><select id="rc_to"></select></div>
-    </div>
-    <label id="rc_start_lb">到日期（可选）</label><input id="rc_start" type="date">
-    <div class="hint" id="rc_start_hint">到这天之后不再自动记账；留空表示一直记下去</div>
-    <div class="next-hint" id="rc_next_hint"></div>
-    <label>备注（可选）</label><input id="rc_note">
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+
+    <div class="modal-foot">
       <button class="btn btn-ghost" onclick="recurClose()">取消</button>
       <button class="btn btn-pri" onclick="recurSave()">保存</button>
     </div>

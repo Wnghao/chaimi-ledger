@@ -10,6 +10,9 @@ function curSym(){
 // 日历单元专用：整数 + 千分位（如 "1,234"），不显示小数——缩小占用避免溢出；详情弹窗仍走 fmt 完整精度
 const fmtI = c => { const n = Math.round(c/100); return n.toLocaleString("en-US"); };
 const today = () => new Date().toISOString().slice(0,10);
+/* 主题色：启动即应用到 body（默认 blue） */
+document.body.dataset.accent = (function(){ try{ return localStorage.getItem("chaimi_accent") || "blue"; }catch(_){ return "blue"; } })();
+function setAccent(a){ document.body.dataset.accent = a; try{ localStorage.setItem("chaimi_accent", a); }catch(_){} }
 const thisMonth = () => new Date().toISOString().slice(0,7);
 /* 退款对「吸收」过滤：已被退款行引用的原交易 id 集合（流水/详情共用） */
 function absorbedIds(items){ return new Set(items.filter(x=>x.refund_for).map(x=>x.refund_for)); }

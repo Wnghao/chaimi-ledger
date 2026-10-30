@@ -8,7 +8,7 @@
   --border:#EFE7DE;      /* 通用边框 */
   --chip:#F5EEE6;        /* 标签/小元素底 */
   --hover:#F7F0E8;       /* hover 高亮 */
-  --mask:rgba(38,32,28,.45);   /* 弹窗遮罩（modal-mask 与退款下拉共用） */
+  --mask:rgba(38,32,28,.38);   /* 弹窗遮罩（modal-mask 与退款下拉共用） */
   --sb-thumb:rgba(38,32,28,.22);        /* 滚动条滑块（悬浮式，仅 hover 提亮） */
   --sb-thumb-hover:rgba(38,32,28,.40);
   color-scheme:light;
@@ -286,9 +286,39 @@ body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="set
 .modal-day{display:flex;flex-direction:column;overflow:hidden}
 /* 弹窗渐变顶条（马卡龙色系，宽度仅 3px 顶部）——视觉锚定但不喧宾夺主 */
 .modal-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);position:relative}
-.modal-head::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--m-purple),var(--m-blue),var(--m-mint),var(--m-peach));border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+/* 顶部渐变条已移除：四色霓虹渐变是"AI 模板"最典型的装饰，且与内容无关 */
 .modal-body{padding:14px 20px;overflow:auto;flex:1;min-height:0}
 .modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
+
+/* ===== 弹窗表单：统一字段网格（周期规则、记一笔、编辑流水共用） =====
+   目标：短字段两列并排（不再单列拉成一长条）、label 与输入框留出呼吸、
+   分组标题把 8-10 个字段切成 3-4 块可扫视的段落 */
+.modal-form{max-width:560px;display:flex;flex-direction:column;max-height:88vh}
+.modal-form .modal-body{overflow-y:auto}
+.form-body{padding:6px 24px 20px}
+.form-sec{margin-top:20px}
+.form-sec:first-child{margin-top:6px}
+.form-sec-title{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:600;
+  color:var(--muted);letter-spacing:.6px;margin-bottom:12px}
+.form-sec-title::after{content:"";flex:1;height:1px;background:var(--border)}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px}
+.field{min-width:0;display:flex;flex-direction:column;gap:6px}
+.field.full{grid-column:1/-1}
+.field>label{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.2px}
+.field input,.field select{height:42px;padding:0 12px;border-radius:12px;border:1px solid var(--border);
+  background:var(--card);color:var(--fg);font-size:14px;width:100%;transition:border-color .15s,box-shadow .15s}
+.field input::placeholder{color:var(--muted);opacity:.7}
+.field input:focus,.field select:focus{outline:none;border-color:var(--primary);
+  box-shadow:0 0 0 3.5px var(--primary-bg)}
+.field .hint{margin:0;font-size:11px;line-height:1.55}
+.modal-form .modal-foot{padding:14px 24px;gap:10px}
+.modal-form .modal-foot .btn{height:40px;padding:0 20px}
+.modal-form .next-hint{margin:12px 0 0;font-size:12px}
+@media(max-width:560px){
+  .form-grid{grid-template-columns:1fr}
+  .form-body{padding:4px 18px 16px}
+  .modal-form .modal-foot{padding:12px 18px}
+}
 /* 导入框：图标 + 文字 + 文件名一行；hover 显示可点击 */
 .imp-btn{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-top:10px;border:1px dashed var(--m-butter-bd);border-radius:var(--radius-sm);cursor:pointer;background:var(--m-butter-50);transition:border-color .15s,background .15s,transform .12s}
 [data-theme="dark"] .imp-btn{background:var(--m-butter-50);border-color:var(--m-butter-bd)}
@@ -409,3 +439,26 @@ body[data-page="renqing"] .gbar, body[data-page="io"] .gbar, body[data-page="set
   .ledger-box{padding:8px 8px 10px}
 }
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+/* ===== 主题色切换（body[data-accent]，localStorage 持久化）=====
+   只重定义 primary 四件套，其余 token 不动；--m-* 会随明暗主题自动取对应档，
+   所以这里不用区分深浅（深色下 m-pink 等自动变成暗底上的亮色）。 */
+body[data-accent="pink"]{--primary:var(--m-pink);--primary-2:var(--m-pink-bd);--primary-bg:var(--m-pink-100);--primary-fg:var(--m-pink-fg)}
+body[data-accent="green"]{--primary:var(--m-mint);--primary-2:var(--m-mint-bd);--primary-bg:var(--m-mint-100);--primary-fg:var(--m-mint-fg)}
+body[data-accent="purple"]{--primary:var(--m-purple);--primary-2:var(--m-purple-bd);--primary-bg:var(--m-purple-100);--primary-fg:var(--m-purple-fg)}
+body[data-accent="peach"]{--primary:var(--m-peach);--primary-2:var(--m-peach-bd);--primary-bg:var(--m-peach-100);--primary-fg:var(--m-peach-fg)}
+body[data-accent="teal"]{--primary:var(--m-teal);--primary-2:var(--m-teal-bd);--primary-bg:var(--m-teal-100);--primary-fg:var(--m-teal-fg)}
+body[data-accent="gray"]{--primary:var(--m-gray);--primary-2:var(--m-gray-bd);--primary-bg:var(--m-gray-100);--primary-fg:var(--m-gray-fg)}
+
+/* ===== 主题色色板（设置 → 用户与预算） ===== */
+.accent-row{display:flex;gap:8px;align-items:center}
+.accent-dot{width:26px;height:26px;border-radius:50%;border:2px solid var(--card);
+  box-shadow:0 0 0 1px var(--border);cursor:pointer;padding:0;transition:transform .12s,box-shadow .15s}
+.accent-dot:hover{transform:scale(1.12)}
+.accent-dot.on{box-shadow:0 0 0 2px var(--fg)}
+.accent-dot.blue{background:var(--m-blue)}  .accent-dot.pink{background:var(--m-pink)}
+.accent-dot.green{background:var(--m-mint)} .accent-dot.purple{background:var(--m-purple)}
+.accent-dot.peach{background:var(--m-peach)}.accent-dot.teal{background:var(--m-teal)}
+.accent-dot.gray{background:var(--m-gray)}
+
+/* 弹窗遮罩加磨砂玻璃（现代感；--mask 透明度相应调浅） */
+.modal-mask{backdrop-filter:blur(5px) saturate(1.1);-webkit-backdrop-filter:blur(5px) saturate(1.1)}

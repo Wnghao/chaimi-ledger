@@ -592,8 +592,12 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 /* 开关（替代裸 checkbox） */
 .switch{display:inline-flex;align-items:center;cursor:pointer;vertical-align:middle;margin-right:4px}
 .switch input{position:absolute;opacity:0;width:0;height:0}
-.switch i{width:34px;height:20px;border-radius:999px;background:var(--border);position:relative;
-  transition:background .18s;display:inline-block}
+.switch i{width:34px;height:20px;border-radius:999px;position:relative;
+  /* 停用态轨道：浅底上用暖棕 28% 才可见（此前 var(--border) 在暖米白卡片上几乎隐形），
+     加一条内描边兜底；深色模式下自然变暗 */
+  transition:background .18s,box-shadow .18s;display:inline-block;
+  background:rgba(122,84,54,.30);box-shadow:inset 0 0 0 1px rgba(122,84,54,.18)}
+[data-theme="dark"] .switch i{background:rgba(255,246,238,.20);box-shadow:inset 0 0 0 1px rgba(255,246,238,.16)}
 .switch i::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;
   background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s}
 .switch input:checked + i{background:var(--primary)}
