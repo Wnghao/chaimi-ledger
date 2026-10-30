@@ -7,26 +7,38 @@
 <link rel="stylesheet" href="static/base.css">
 <style>
 /* ===== 登录页：与 home.html（选择用户页）同一 lg-* 设计语言。
-   ≤768px 竖排居中卡片；宽屏左品牌区右表单。 ===== */
+   ≤768px 竖排单卡片；宽屏左品牌区 + 右渐变底悬浮卡片，两屏呼应。 ===== */
 html,body{height:100%}
 body{display:flex;align-items:center;justify-content:center;background:var(--bg)}
 .lg-wrap{display:flex;width:100%;max-width:420px;min-height:100vh;flex-direction:column;background:var(--bg)}
 .lg-brand{display:none}
-.lg-panel{flex:1;display:flex;flex-direction:column;justify-content:center;padding:40px 30px}
-.lg-mhead{display:flex;flex-direction:column;margin-bottom:26px}
-.lg-mhead img{width:72px;height:72px;border-radius:20px;box-shadow:var(--shadow)}
-.lg-h1{font-size:22px;font-weight:700;margin-bottom:8px;color:var(--fg)}
-.lg-sub{font-size:13.5px;color:var(--muted);line-height:1.75}
-.lg-label{font-size:12.5px;color:var(--muted);margin:24px 0 8px}
-.lg-input{width:100%;height:46px;border:1.5px solid var(--border);border-radius:var(--radius-sm);
-  background:var(--card);padding:0 14px;font-size:16px;color:var(--fg);outline:none;font-family:inherit}
-.lg-input:focus{border-color:var(--primary)}
-.lg-input.lg-err{border-color:var(--m-peach)}
-.lg-go{width:100%;height:48px;border:none;border-radius:var(--radius-sm);background:var(--primary);
-  color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-top:32px;font-family:inherit}
-.lg-go:active{background:var(--primary-bg);color:var(--m-blue-fg)}
-.lg-go:disabled{opacity:.6;cursor:default}
-.lg-foot{font-size:12px;color:var(--muted);text-align:center;margin-top:14px}
+/* 右侧：淡彩渐变底，表单浮在白卡上（宽屏同样式，移动端不再是大白板） */
+.lg-panel{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;
+  padding:40px 30px;position:relative;overflow:hidden;
+  background:linear-gradient(165deg,var(--m-blue-50) 0%,#FBF7F2 52%,var(--m-mint-50) 100%)}
+.lg-blob{position:absolute;border-radius:50%;opacity:.45;filter:blur(2px)}
+.lg-blob.b1{width:210px;height:210px;background:var(--m-blue-50);right:-70px;top:-60px}
+.lg-blob.b2{width:140px;height:140px;background:#FBEBF0;right:36px;bottom:-46px}
+.lg-blob.b3{width:84px;height:84px;background:var(--m-mint-50);left:-22px;bottom:66px}
+.lg-card{width:100%;max-width:390px;background:var(--card);border-radius:24px;box-shadow:var(--shadow-lg);
+  padding:36px 34px 32px;position:relative}
+.lg-mhead{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.lg-mhead img{width:56px;height:56px;border-radius:16px;box-shadow:var(--shadow)}
+.lg-h1{font-size:21px;font-weight:700;color:var(--fg)}
+.lg-sub{font-size:12.5px;color:var(--muted);line-height:1.7;margin-top:2px}
+.lg-label{font-size:12.5px;color:var(--muted);margin:20px 0 8px}
+.lg-input{width:100%;height:46px;border:1.5px solid var(--border);border-radius:12px;
+  background:var(--bg);padding:0 14px;font-size:16px;color:var(--fg);outline:none;font-family:inherit;
+  transition:border-color .15s, box-shadow .15s}
+.lg-input:focus{border-color:var(--primary);box-shadow:0 0 0 3.5px var(--primary-bg)}
+.lg-input.lg-err{border-color:var(--m-peach);box-shadow:0 0 0 3.5px var(--m-peach-50, #FBEBF0)}
+.lg-go{width:100%;height:48px;border:none;border-radius:12px;
+  background:linear-gradient(135deg,var(--primary) 0%,var(--primary-2) 100%);
+  color:#fff;font-size:16px;font-weight:600;cursor:pointer;margin-top:30px;font-family:inherit;
+  box-shadow:0 6px 16px -6px var(--primary-2);transition:transform .15s, box-shadow .15s, opacity .15s}
+.lg-go:hover{transform:translateY(-1px);box-shadow:0 9px 20px -6px var(--primary-2)}
+.lg-go:active{transform:translateY(0)}
+.lg-go:disabled{opacity:.6;cursor:default;transform:none}
 #lgToast{position:fixed;left:50%;bottom:36px;transform:translateX(-50%) translateY(20px);opacity:0;
   background:var(--fg);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:13px;
   transition:all .25s;pointer-events:none;z-index:9}
@@ -35,16 +47,22 @@ body{display:flex;align-items:center;justify-content:center;background:var(--bg)
   .lg-wrap{flex-direction:row;width:100%;max-width:none;height:100vh;min-height:0;background:var(--card);overflow:hidden}
   .lg-brand{flex:0 0 41%;display:flex;flex-direction:column;justify-content:center;padding:0 5.5vw;position:relative;
     overflow:hidden;background:linear-gradient(160deg,var(--m-blue-50) 0%,#F3EEFE 100%)}
-  .lg-blob{position:absolute;border-radius:50%;opacity:.5}
-  .lg-blob.b1{width:220px;height:220px;background:var(--m-blue-50);right:-70px;top:-60px}
-  .lg-blob.b2{width:150px;height:150px;background:#FBEBF0;right:40px;bottom:-50px}
-  .lg-blob.b3{width:90px;height:90px;background:var(--m-mint-50);left:-24px;bottom:70px}
+  .lg-brand .lg-blob{filter:none}
+  .lg-brand .lg-blob.b1{width:220px;height:220px;right:-70px;top:-60px}
+  .lg-brand .lg-blob.b2{width:150px;height:150px;background:#FBEBF0;right:40px;bottom:-50px}
+  .lg-brand .lg-blob.b3{width:90px;height:90px;background:var(--m-mint-50);left:-24px;bottom:70px}
   .lg-icon{width:88px;height:88px;border-radius:24px;box-shadow:var(--shadow-lg);position:relative}
   .lg-name{font-size:27px;font-weight:700;margin-top:24px;position:relative;color:var(--fg)}
   .lg-tag{margin-top:12px;color:var(--muted);font-size:14px;line-height:1.9;position:relative;max-width:300px}
-  .lg-panel{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:48px 5vw}
-  .lg-panel>*{width:100%;max-width:420px}   /* 表单一列居中，不贴左 */
-  .lg-mhead{display:none}   /* 宽屏品牌区已有图标标题 */
+  .lg-panel{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:48px 5vw;
+    background:linear-gradient(165deg,var(--m-blue-50) 0%,#FDF6F2 50%,var(--m-mint-50) 100%)}
+  .lg-panel .lg-blob{opacity:.6;filter:none}
+  .lg-panel .lg-blob.b1{width:260px;height:260px;right:-80px;top:-70px}
+  .lg-panel .lg-blob.b2{width:180px;height:180px;background:#FBEBF0;right:60px;bottom:-60px}
+  .lg-panel .lg-blob.b3{width:110px;height:110px;left:-30px;bottom:90px}
+  .lg-card{max-width:400px;padding:42px 44px 38px}
+  .lg-mhead{margin-bottom:10px}
+  .lg-mhead img{width:60px;height:60px}
 }
 </style>
 </head>
@@ -52,24 +70,28 @@ body{display:flex;align-items:center;justify-content:center;background:var(--bg)
   <div class="lg-wrap">
     <div class="lg-brand">
       <div class="lg-blob b1"></div><div class="lg-blob b2"></div><div class="lg-blob b3"></div>
-      <img class="lg-icon" src="static/icon.png" alt="柴米记账">
+      <img class="lg-icon" src="images/login-cow.png" alt="柴米记账">
       <div class="lg-name">柴米记账</div>
       <div class="lg-tag">柴米油盐，一笔一账。<br>数据全在本机，登录后与家人共用这本账。</div>
     </div>
     <div class="lg-panel">
-      <div class="lg-mhead">
-        <img src="static/icon.png" alt="柴米记账">
-        <div class="lg-h1" style="margin-top:16px">柴米记账</div>
-        <div class="lg-sub">数据全在本机，登录后与家人共用这本账。</div>
+      <div class="lg-blob b1"></div><div class="lg-blob b2"></div><div class="lg-blob b3"></div>
+      <div class="lg-card">
+        <div class="lg-mhead">
+          <img src="images/login-cow.png" alt="柴米记账">
+          <div>
+            <div class="lg-h1">欢迎回来</div>
+            <div class="lg-sub">登录后，继续这本家庭的账</div>
+          </div>
+        </div>
+        <form onsubmit="return doLogin(event)">
+          <div class="lg-label">用户名</div>
+          <input class="lg-input" id="lgUser" autocomplete="username" autocapitalize="off" spellcheck="false">
+          <div class="lg-label">密码</div>
+          <input class="lg-input" id="lgPwd" type="password" autocomplete="current-password">
+          <button class="lg-go" id="lgGo" type="submit">登 录</button>
+        </form>
       </div>
-      <form onsubmit="return doLogin(event)">
-        <div class="lg-label">用户名</div>
-        <input class="lg-input" id="lgUser" autocomplete="username" autocapitalize="off" spellcheck="false">
-        <div class="lg-label">密码</div>
-        <input class="lg-input" id="lgPwd" type="password" autocomplete="current-password">
-        <button class="lg-go" id="lgGo" type="submit">登 录</button>
-      </form>
-      <div class="lg-foot">凭证在服务端 chaimi.conf 的 web_auth 段配置</div>
     </div>
   </div>
   <div id="lgToast"></div>
@@ -101,11 +123,12 @@ async function doLogin(ev){
       let e = "登录失败"; try{ e = (await r.json()).detail || e }catch(_){}
       p.classList.add("lg-err"); p.value = ""; p.focus();
       toast(e);
+      btn.disabled = false;   // 失败恢复按钮，允许重试（此前漏了导致二次无法点击）
       return false;
     }
     location.href = safeNext();
-  }catch(_){ toast("网络异常，请重试"); }
-  btn.disabled = false;
+    return false;   // 已在跳转中，不恢复按钮
+  }catch(_){ toast("网络异常，请重试"); btn.disabled = false; }
   return false;
 }
 document.querySelector("#lgUser").focus();
