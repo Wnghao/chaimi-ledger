@@ -420,6 +420,15 @@ async function refreshStats(){
   $("#trendCard").style.display = trend.length ? "" : "none";
   const range = statRange;
   if($("#tab-stats").classList.contains("on")){
+    const catEmpty = (id, tip) => {
+      const card = document.querySelector("#" + id)?.closest(".card");
+      if(!card) return;
+      const exist = card.querySelector(".chart-empty");
+      if(cats.length){ exist?.remove(); return; }
+      if(!exist) card.insertAdjacentHTML("beforeend",
+        `<div class="chart-empty"><div class="ce-ic">${tip[0]}</div>${tip[1]}</div>`);
+    };
+    catEmpty("catChart", ["饼", "这个范围里还没有支出记录<br>记账后会在这里按分类汇总"]);
     if(cats.length) await drawChart("catChart","doughnut", cats.map(c=>c.name), cats.map(c=>c.net/100), null,
       (e, els)=>{ const i = els[0].index; showCategoryDetail(cats[i].name, range); }, "catLegend");
     if(catsInc.length) await drawChart("catIncChart","doughnut", catsInc.map(c=>c.name), catsInc.map(c=>c.net/100), null,
