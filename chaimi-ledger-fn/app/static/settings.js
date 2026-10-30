@@ -621,7 +621,7 @@ async function botTest(){
   }catch(e){ out.textContent = "❌ " + e.message; }
 }
 
-/* ===== 周期记账（到期由后台线程生成流水；规则 CRUD 见 /api/recurrences） ===== */
+/* ===== 周期记账（到记账日由后台线程生成流水；规则 CRUD 见 /api/recurrences） ===== */
 let recurEditId = null;   // null=新增；数字=编辑
 
 async function loadRecur(){
@@ -635,22 +635,107 @@ async function loadRecur(){
     const dom = r.day_of_month || "月末";
     return r.interval > 1 ? `每 ${r.interval} 月·${dom} 号` : `每月 ${dom} 号`;
   };
-  $("#recurTable tbody").innerHTML = rows.map(r => `
-    <tr>
-      <td>${esc(r.name)}${r.note ? '<br><span class="sub">' + esc(r.note) + "</span>" : ""}</td>
-      <td>${TYPE_CN[r.type] || r.type}</td>
-      <td style="text-align:right" class="num">${curSym()}${fmt(r.amount)}</td>
-      <td>${freqDesc(r)}</td>
-      <td>${esc(r.next_date || "—")}</td>
-      <td>${r.enabled ? '<b>启用</b>' : '<span class="sub">停用</span>'}</td>
+  // 顶部概览卡：启用条数 + 每月预计支出/收入（日/周规则折算到月，仅作参考）
+  const on = rows.filter(r => r.enabled);
+  const toMonthly = r => {
+    const n = r.interval || 1;
+    if(r.frequency === "daily") return r.amount * 30 / n;
+    if(r.frequency === "weekly") return r.amount * 4.348 / n;
+    return r.amount / n;
+  };
+  const expM = on.filter(r => r.type === "expense").reduce((a, r) => a + toMonthly(r), 0);
+  const incM = on.filter(r => r.type === "income").reduce((a, r) => a + toMonthly(r), 0);
+  if($("#recurCards")) $("#recurCards").innerHTML = `
+    <div class="debt-stat">
+      <div class="dt-label">启用规则</div>
+      <div class="dt-val num">${on.length} <span class="sub" style="font-size:12px;font-weight:500">/ ${rows.length} 条</span></div>
+      <div class="dt-meta">${rows.length - on.length} 条已停用</div></div>
+    <div class="debt-stat out">
+      <div class="dt-label">每月预计支出</div>
+      <div class="dt-val num">${curSym()}${fmt(Math.round(expM))}</div>
+      <div class="dt-meta">按启用规则折算</div></div>
+    <div class="debt-stat in">
+      <div class="dt-label">每月预计收入</div>
+      <div class="dt-val num">${curSym()}${fmt(Math.round(incM))}</div>
+      <div class="dt-meta">按启用规则折算</div></div>`;
+  // 7 天内将记账高亮（用本地时间算，避免 toISOString 的时区偏移）
+  const d7 = new Date(Date.now() + 7 * 864e5);
+  const d7s = `${d7.getFullYear()}-${String(d7.getMonth() + 1).padStart(2, "0")}-${String(d7.getDate()).padStart(2, "0")}`;
+  $("#recurTable tbody").innerHTML = rows.map(r => {
+    const soon = r.enabled && r.next_date && r.next_date <= d7s;
+    return `<tr style="${r.enabled ? "" : "opacity:.62"}">
+      <td><b>${esc(r.name)}</b>${r.note ? '<div class="sub" style="margin-top:2px">' + esc(r.note) + "</div>" : ""}</td>
+      <td><span class="dbt-dir ${r.type === "income" ? "in" : r.type === "transfer" ? "tr" : "out"}">${TYPE_CN[r.type] || r.type}</span></td>
+      <td style="text-align:right" class="num"><b>${curSym()}${fmt(r.amount)}</b></td>
+      <td class="sub">${freqDesc(r)}</td>
+      <td class="num">${esc(r.next_date || "—")}${soon ? '<span class="dbt-dot" title="7 天内会记账"></span>' : ""}</td>
+      <td class="num sub" style="color:var(--muted)">${r.end_date ? esc(r.end_date) : "—"}</td>
+      <td>${r.enabled ? '<span class="dbt-pill settled">启用中</span>' : '<span class="dbt-pill off">已停用</span>'}</td>
       <td style="white-space:nowrap;text-align:right">
-        <label class="sub" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-          <input type="checkbox" ${r.enabled ? "checked" : ""} onchange="recurToggle(${r.id}, this.checked)">启用</label>
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="recurRun(${r.id})">记一期</button>
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="recurEdit(${r.id})">编辑</button>
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="recurDel(${r.id}, ${qEsc(r.name)})">删</button>
-      </td></tr>`).join("");
+        <label class="switch" title="${r.enabled ? "点击停用" : "点击启用"}">
+          <input type="checkbox" ${r.enabled ? "checked" : ""} onchange="recurToggle(${r.id}, this.checked)"><i></i></label>
+        <button class="btn btn-ghost dbt-btn" onclick="recurRun(${r.id})">记一期</button>
+        <button class="btn btn-ghost dbt-btn" onclick="recurEdit(${r.id})">编辑</button>
+        <button class="btn btn-ghost dbt-btn" onclick="recurDel(${r.id}, '${qEsc(r.name)}')">删</button>
+      </td></tr>`;
+  }).join("");
   $("#recurEmpty").style.display = rows.length ? "none" : "block";
+}
+
+/* ---- 下次记账预览（与后端 recurrence.next_period 同口径：monthly 超月末钳位） ---- */
+let _recurPreviewBound = false;
+function _nextDateFrom(todayStr, freq, interval, weekday, dom){
+  const n = Math.max(1, interval || 1);
+  const d = new Date(todayStr + "T00:00:00");
+  const pad = x => String(x).padStart(2, "0");
+  const iso = x => `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+  if(freq === "daily"){ const t = new Date(d); t.setDate(t.getDate() + n); return iso(t); }
+  if(freq === "weekly"){
+    const target = weekday ?? 0;                 // 0=周一 … 6=周日
+    const cur = (d.getDay() + 6) % 7;            // JS 0=周日 → 转成 0=周一
+    let diff = (target - cur + 7) % 7;
+    diff = diff === 0 ? 7 * n : diff + 7 * (n - 1);
+    const t = new Date(d); t.setDate(t.getDate() + diff); return iso(t);
+  }
+  // monthly：从本月起逐月找第一个 > 今天的 dom 号；该月没有这天就取月末
+  let y = d.getFullYear(), m = d.getMonth();     // m: 0-11
+  for(let i = 0; i < 24; i++){
+    const last = new Date(y, m + 1, 0).getDate();       // 当月最后一天
+    const day = Math.min(dom || d.getDate(), last);
+    const cand = new Date(y, m, day);
+    if(cand > d) return iso(cand);
+    m += n; while(m > 11){ m -= 12; y += 1; }
+  }
+  return "";
+}
+function recurNextPreview(){
+  const el = $("#rc_next_hint");
+  if(!el) return;
+  const freq = $("#rc_freq").value;
+  const interval = Math.max(1, parseInt($("#rc_interval").value || "1", 10));
+  const weekday = parseInt($("#rc_weekday").value || "0", 10);
+  const dom = parseInt($("#rc_dom").value || "1", 10);
+  const next = _nextDateFrom(today(), freq, interval, weekday, dom);
+  if(!next){ el.textContent = ""; el.style.display = "none"; return; }
+  el.style.display = "";
+  // 月末钳位的说明：设 29-31 号时遇到小月会按月末记
+  let tip = "";
+  if(freq === "monthly" && dom > 28){
+    const mm = +next.slice(5, 7), dd = +next.slice(8, 10);
+    // 钳位了就说清哪个月没有这天；没钳位也提示"遇小月按月末记"
+    tip = dd < dom ? `（${mm} 月没有 ${dom} 号，按月末 ${dd} 日记）` : "（遇小月按月末记）";
+  }
+  el.innerHTML = `下次记账：<b>${next}</b>${tip}`;
+}
+function recurBindPreview(){
+  if(_recurPreviewBound) return;
+  _recurPreviewBound = true;
+  ["rc_freq", "rc_interval", "rc_weekday", "rc_dom"].forEach(id => {
+    const el = $("#" + id);
+    if(!el) return;
+    el.addEventListener("change", recurNextPreview);
+    el.addEventListener("input", recurNextPreview);
+  });
 }
 
 function recurFillSelects(){
@@ -672,11 +757,13 @@ function recurOnType(){
 function recurOpen(){
   recurEditId = null;
   $("#recurTitle").textContent = "新增周期规则";
+  $("#rc_start").value = "";
+  $("#rc_start_lb").textContent = "到日期（可选）";
   $("#rc_name").value = ""; $("#rc_amt").value = ""; $("#rc_note").value = "";
   $("#rc_type").value = "expense"; $("#rc_freq").value = "monthly";
   $("#rc_interval").value = 1; $("#rc_weekday").value = "0"; $("#rc_dom").value = 1;
-  $("#rc_start").value = today();
   recurFillSelects(); recurOnFreq(); recurOnType();
+  recurBindPreview(); recurNextPreview();
   $("#recurMask").style.display = "flex";
 }
 async function recurEdit(id){
@@ -686,16 +773,21 @@ async function recurEdit(id){
   recurEditId = id;
   $("#recurTitle").textContent = "编辑规则";
   $("#rc_name").value = r.name;
+  // 金额回填：库里是分，输入框是元（此前漏了这行 → 编辑弹框金额为空，
+  // 直接保存会把金额写成 0）
+  $("#rc_amt").value = (r.amount / 100).toFixed(2).replace(/\.?0+$/, "");
   $("#rc_type").value = r.type; $("#rc_freq").value = r.frequency;
   $("#rc_interval").value = r.interval || 1;
   $("#rc_weekday").value = String(r.weekday ?? 0);
   $("#rc_dom").value = r.day_of_month || 1;
-  $("#rc_start").value = r.next_date || today();
+  $("#rc_start").value = r.end_date || "";   // 到日期（空=一直记）
+  $("#rc_start_lb").textContent = "到日期（可选）";
   $("#rc_note").value = r.note || "";
   recurFillSelects(); recurOnFreq(); recurOnType();
   $("#rc_cat").value = r.category_id || "";
   $("#rc_acc").value = r.account_id || "";
   $("#rc_to").value = r.to_account_id || "";
+  recurBindPreview(); recurNextPreview();
   $("#recurMask").style.display = "flex";
 }
 function recurClose(){ $("#recurMask").style.display = "none"; }
@@ -712,11 +804,10 @@ async function recurSave(){
     account_id: +$("#rc_acc").value || null,
     to_account_id: $("#rc_type").value === "transfer" ? (+$("#rc_to").value || null) : null,
     note: $("#rc_note").value.trim() || null,
-    start_date: $("#rc_start").value,
+    end_date: $("#rc_start").value || null,   // 到日期：留空=一直记
   };
   if(!body.name){ msg("名称不能为空", false); return; }
   if(!(body.amount > 0)){ msg("金额须大于 0", false); return; }
-  if(!body.start_date){ msg("请选首次到期日", false); return; }
   try{
     if(recurEditId) await apiSend(`/api/recurrences/${recurEditId}`, "PUT", body);
     else await apiSend(`/api/recurrences?ledger=${lid()}`, "POST", body);
@@ -732,7 +823,7 @@ async function recurToggle(id, on){
   loadRecur();
 }
 async function recurRun(id){
-  if(!(await uiConfirm("立即生成这一期流水？（到期未触发按到期日入账，否则按今天）", "记一期"))) return;
+  if(!(await uiConfirm("立即记这一期？（还没到记账日就按今天记，节奏不变）", "记一期"))) return;
   try{
     const r = await api(`/api/recurrences/${id}/run`, {method:"POST"});
     msg(r.tx_id ? "已生成流水" : "该期已生成过，跳过");

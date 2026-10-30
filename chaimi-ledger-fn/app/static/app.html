@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="images/login-cow-64.png">
+<link rel="apple-touch-icon" href="images/icon-256.png">
 <title>柴米记账</title>
 <link rel="stylesheet" href="static/base.css">
 <link rel="stylesheet" href="static/views.css">
@@ -354,13 +356,15 @@
             <option value="settled">已还清</option>
           </select>
           <span class="spacer"></span>
-          <button class="btn btn-ghost" onclick="debtOpen('out')">＋ 借出</button>
-          <button class="btn btn-ghost" onclick="debtOpen('in')">＋ 借入</button>
+          <button class="btn btn-debt out" onclick="debtOpen('out')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>借出</button>
+          <button class="btn btn-debt in" onclick="debtOpen('in')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>借入</button>
         </div>
+        <div class="tbl-scroll">
         <table id="debtTable"><thead><tr>
           <th>人</th><th>方向</th><th style="text-align:right">本金</th><th style="text-align:right">已还</th>
           <th style="text-align:right">未还</th><th>借出/入日</th><th>还款日</th><th>状态</th><th style="width:150px"></th>
         </tr></thead><tbody></tbody></table>
+        </div>
         <div class="sub" id="debtEmpty" style="display:none;padding:8px 0">暂无记录：点右上「＋ 借出 / 借入」新增一笔</div>
       </div>
     </section>
@@ -368,16 +372,22 @@
     <!-- ===== 周期记账（独立页，规则 CRUD 见 /api/recurrences） ===== -->
     <section class="page" id="tab-recur">
       <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
-          <b>周期记账</b>
-          <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="recurOpen()">＋ 新增规则</button>
+        <div class="pg-head">
+          <div class="pg-head-txt">
+            <b class="pg-title">周期记账</b>
+            <div class="sub">房租、订阅、工资等固定收支：到记账日自动记一笔（来源标记「周期」）；停机漏掉的不回补，改规则立即生效</div>
+          </div>
+          <button class="btn btn-add" onclick="recurOpen()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>新增规则</button>
         </div>
-        <div class="sub" style="margin-bottom:8px">房租、订阅、工资等固定收支：到期日由后台自动生成一笔流水（流水来源标记「周期」）。服务停机漏掉的周期不回补；改动规则立即生效，无需重启。</div>
-        <table id="recurTable"><thead><tr>
-          <th>名称</th><th>类型</th><th style="text-align:right">金额</th><th>周期</th>
-          <th>下次到期</th><th>状态</th><th style="width:190px"></th>
-        </tr></thead><tbody></tbody></table>
-        <div class="sub" id="recurEmpty" style="display:none;padding:8px 0">暂无规则：点右上「＋ 新增规则」</div>
+        <div class="row" id="recurCards" style="margin-top:14px;gap:10px"></div>
+        <div class="tbl-scroll">
+          <table id="recurTable"><thead><tr>
+            <th>名称</th><th>类型</th><th style="text-align:right">金额</th><th>周期</th>
+            <th>下次记账</th><th>到日期</th><th>状态</th><th style="width:210px"></th>
+          </tr></thead><tbody></tbody></table>
+        </div>
+        <div class="sub" id="recurEmpty" style="display:none;padding:14px 0;text-align:center">还没有规则：点右上「新增规则」</div>
       </div>
     </section>
 
@@ -742,7 +752,9 @@
       <div id="rc_acc_wrap"><label>账户</label><select id="rc_acc"></select></div>
       <div id="rc_to_wrap" style="display:none"><label>收款账户</label><select id="rc_to"></select></div>
     </div>
-    <label>首次到期日</label><input id="rc_start" type="date">
+    <label id="rc_start_lb">到日期（可选）</label><input id="rc_start" type="date">
+    <div class="hint" id="rc_start_hint">到这天之后不再自动记账；留空表示一直记下去</div>
+    <div class="next-hint" id="rc_next_hint"></div>
     <label>备注（可选）</label><input id="rc_note">
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
       <button class="btn btn-ghost" onclick="recurClose()">取消</button>

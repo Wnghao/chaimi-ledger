@@ -1,15 +1,16 @@
-"""周期自动记账：到期规则生成流水（DESIGN 外新功能，AutoBackup 同款线程模型）。
+"""周期自动记账：到记账日的规则生成流水（DESIGN 外新功能，AutoBackup 同款线程模型）。
 
 线程：daemon 线程 60s 轮询，每 tick 现查库（规则是业务数据，改完免重启）；
 幂等：流水 row_hash = md5("recur|{rule_id}|{next_date}")，确定性 hash——重复
 触发/并发/重启都不会双记同一期（insert_tx 的时间戳 hash 只适用于人工路径）；
-补跑刻意不做（浩拍板）：每次到期只生成 next_date 当期一笔再推进，停机漏掉
+补跑刻意不做（浩拍板）：每次只生成 next_date（记账日）当期一笔再推进，停机漏掉
 的周期不回补——漏了就漏了，避免长期停机后爆量重复。
 
 纯函数（next_period / fire_rule）与线程解耦，单测直接驱动。
 """
 from __future__ import annotations
 
+import calendar
 import hashlib
 import sqlite3
 import threading
@@ -34,7 +35,7 @@ def next_period(d: str, frequency: str, interval: int = 1,
     if frequency == "daily":
         return (cur + timedelta(days=n)).isoformat()
     if frequency == "weekly":
-        # 以 d 为锚点按 N 周推进（weekday 字段用于创建时对齐首个到期日，推进保持锚点节奏）
+        # 以 d 为锚点按 N 周推进（weekday 字段用于创建时对齐首个记账日，推进保持锚点节奏）
         return (cur + timedelta(weeks=n)).isoformat()
     if frequency == "monthly":
         m = cur.month - 1 + n
@@ -49,6 +50,38 @@ def next_period(d: str, frequency: str, interval: int = 1,
         return date(year, month, min(dom, last)).isoformat()
     raise ValueError(f"未知周期类型：{frequency}")
 
+
+def first_due(today: str, frequency: str, interval: int = 1,
+              weekday: int | None = None, day_of_month: int | None = None) -> str:
+    """新建规则时的首个记账日：从今天起找**最近一个合规日期**（今天本身不算）。
+    与 next_period 分工：next_period 是"从已对齐的记账日往后推 N 个周期"，
+    first_due 是"从任意日期找最近的一个周期日"——两者语义不同，不能混用：
+      · 今天 10-30、每月 31 号 → 首次 10-31（next_period 会推到 11-30，反直觉）
+      · 今天 10-30（周五）、每周四 → 首次 11-05（next_period 会给 11-06）
+    monthly 遇小月钳到月末；interval>1 时未命中则跳 N 个月再试。"""
+    n = max(1, int(interval or 1))
+    cur = date.fromisoformat(today)
+    if frequency == "daily":
+        return (cur + timedelta(days=n)).isoformat()
+    if frequency == "weekly":
+        target = 0 if weekday is None else int(weekday)   # 0=周一
+        diff = (target - cur.weekday()) % 7
+        diff = 7 * n if diff == 0 else diff + 7 * (n - 1)
+        return (cur + timedelta(days=diff)).isoformat()
+    if frequency != "monthly":
+        raise ValueError(f"未知周期类型：{frequency}")
+    y, m = cur.year, cur.month
+    for _ in range(24):
+        last = calendar.monthrange(y, m)[1]
+        day = min(day_of_month or cur.day, last)
+        cand = date(y, m, day)
+        if cand > cur:
+            return cand.isoformat()
+        m += n
+        while m > 12:
+            m -= 12
+            y += 1
+    return next_period(today, frequency, interval, weekday, day_of_month)
 
 def row_hash(rule_id: int, period_date: str) -> str:
     """确定性流水 hash：同规则同周期日恒同 hash，判重天然幂等。"""
@@ -75,34 +108,45 @@ def _fire(c: sqlite3.Connection, rule: sqlite3.Row, period: str, today: str) -> 
          rule["account_id"], rule["to_account_id"], period, rule["name"],
          rule["note"], "recur", h))
     tx_id = cur.lastrowid
+    nxt = next_period(rule["next_date"], rule["frequency"], rule["interval"],
+                      rule["weekday"], rule["day_of_month"])
+    end = rule["end_date"] if "end_date" in rule.keys() else None
+    # 下一期已越过「到日期」→ 记完这期就自动停用
+    stop = bool(end and nxt > end)
     c.execute(
-        """UPDATE recurrences SET next_date=?, last_tx_id=?, last_run_date=? WHERE id=?""",
-        (next_period(rule["next_date"], rule["frequency"], rule["interval"],
-                     rule["weekday"], rule["day_of_month"]), tx_id, today, rule["id"]))
+        "UPDATE recurrences SET next_date=?, last_tx_id=?, last_run_date=?"
+        + (", enabled=0" if stop else "") + " WHERE id=?",
+        (nxt, tx_id, today, rule["id"]))
+    if stop:
+        _log.info(f"周期记账：规则 {rule['id']}「{rule['name']}」已到到日期 {end}，自动停用")
     return tx_id
 
 
 def fire_rule(c: sqlite3.Connection, rule: sqlite3.Row, today: str) -> int | None:
-    """触发单条到期规则：按 next_date 生成当期一笔流水再推进。返回流水 id（重复触发 None）。
-    到期已过（next_date<today）也按 next_date 记账——那是周期的自然日期，漏跑不补、
+    """触发单条到记账日的规则：按 next_date（记账日）生成当期一笔流水再推进。返回流水 id（重复触发 None）。
+    记账日已过（next_date<today）也按该日入账——那是周期的自然日期，漏跑不补、
     但这一期的账不能凭空记到别的日子。"""
     return _fire(c, rule, rule["next_date"], today)
 
 
 def fire_now(c: sqlite3.Connection, rule: sqlite3.Row, today: str) -> int | None:
-    """手动立即记一期（设置页「记一期」按钮）：到期未触发按 next_date，否则按今天记；
+    """手动立即记一期（设置页「记一期」按钮）：已过记账日按 next_date，否则按今天记；
     节奏锚不变（推进始终从 next_date 起算，手动提前记不吃掉后续周期）。"""
     period = rule["next_date"] if rule["next_date"] <= today else today
     return _fire(c, rule, period, today)
 
 
 def fire_due(c: sqlite3.Connection, today: str | None = None) -> list[int]:
-    """扫描全部到期规则并逐条触发（每规则一笔，不回补）。返回新生成的流水 id。"""
+    """扫描全部到记账日的规则并逐条触发（每规则一笔，不回补）。返回新生成的流水 id。"""
     today = today or datetime.now().strftime("%Y-%m-%d")
     fired: list[int] = []
     with c:
+        # 越过「到日期」的规则先自动停用（end_date 之后的周期不再记账）
+        c.execute("UPDATE recurrences SET enabled=0 WHERE enabled=1 "
+                  "AND end_date IS NOT NULL AND next_date>end_date")
         rules = c.execute(
             "SELECT * FROM recurrences WHERE enabled=1 AND next_date<=? "
+            "AND (end_date IS NULL OR next_date<=end_date) "
             "ORDER BY next_date, id", (today,)).fetchall()
         for r in rules:
             try:
@@ -112,7 +156,7 @@ def fire_due(c: sqlite3.Connection, today: str | None = None) -> list[int]:
             except sqlite3.Error as e:   # 单规则失败不断整轮（下一 tick 重试）
                 _log.warning(f"周期记账规则 {r['id']} 触发失败: {e}")
     if fired:
-        _log.info(f"周期记账：生成 {len(fired)} 笔到期流水")
+        _log.info(f"周期记账：生成 {len(fired)} 笔流水")
     return fired
 
 
@@ -130,7 +174,7 @@ def validate(frequency: str, interval: int, weekday, day_of_month) -> None:
 
 
 class RecurRunner:
-    """常驻轮询线程（AutoBackup 同款）：60s 一 tick，每 tick 扫一轮到期规则。"""
+    """常驻轮询线程（AutoBackup 同款）：60s 一 tick，每 tick 扫一轮到记账日的规则。"""
 
     def __init__(self, on_change=None):
         self.on_change = on_change or (lambda: None)   # 生成流水后唤醒前端长轮询

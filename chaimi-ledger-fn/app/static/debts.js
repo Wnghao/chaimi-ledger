@@ -13,35 +13,40 @@ async function loadDebts(){
       api(`/api/debts?ledger=${lid()}&status=${status}`),
     ]);
   }catch(e){ msg("债务加载失败：" + e.message, false); return; }
-  // 汇总卡：总借出在外 / 总借入在外 / 逾期
+  // 汇总卡：总借出在外 / 总借入在外 / 逾期（样式见 views.css 的 .debt-stat）
   const ov = sum.overdue.length;
   $("#debtCards").innerHTML = `
-    <div class="card" style="flex:1;min-width:150px;margin:0;padding:12px 16px">
-      <div class="sub">总借出在外</div><b class="num" style="font-size:20px">${curSym()}${fmt(sum.out.total)}</b>
-      <span class="sub" style="margin-left:6px">${sum.out.count} 笔</span></div>
-    <div class="card" style="flex:1;min-width:150px;margin:0;padding:12px 16px">
-      <div class="sub">总借入在外</div><b class="num" style="font-size:20px">${curSym()}${fmt(sum.in.total)}</b>
-      <span class="sub" style="margin-left:6px">${sum.in.count} 笔</span></div>
-    <div class="card" style="flex:1;min-width:150px;margin:0;padding:12px 16px">
-      <div class="sub">逾期未还</div><b class="num" style="font-size:20px;${ov?"color:var(--m-coral,#e8654a)":""}">${ov}</b>
-      <span class="sub" style="margin-left:6px">笔</span></div>`;
+    <div class="debt-stat out">
+      <div class="dt-label">总借出在外</div>
+      <div class="dt-val num">${curSym()}${fmt(sum.out.total)}</div>
+      <div class="dt-meta">${sum.out.count} 笔未收回</div></div>
+    <div class="debt-stat in">
+      <div class="dt-label">总借入在外</div>
+      <div class="dt-val num">${curSym()}${fmt(sum.in.total)}</div>
+      <div class="dt-meta">${sum.in.count} 笔未归还</div></div>
+    <div class="debt-stat ${ov ? "warn" : ""}">
+      <div class="dt-label">逾期未还</div>
+      <div class="dt-val num" style="${ov ? "color:var(--expense)" : ""}">${ov} <span class="sub" style="font-size:12px;font-weight:500">笔</span></div>
+      <div class="dt-meta">${ov ? "需要尽快处理" : "暂无逾期"}</div></div>`;
   $("#debtTable tbody").innerHTML = rows.map(d => {
     const remaining = d.amount - d.repaid;
     const overdue = d.status === "open" && d.due_date && d.due_date < today();
     return `<tr>
-      <td>${esc(d.person)}</td>
-      <td>${DIR_CN[d.direction] || d.direction}</td>
+      <td><b>${esc(d.person)}</b></td>
+      <td><span class="dbt-dir ${d.direction}">${DIR_CN[d.direction] || d.direction}</span></td>
       <td style="text-align:right" class="num">${fmt(d.amount)}</td>
-      <td style="text-align:right" class="num">${fmt(d.repaid)}</td>
-      <td style="text-align:right" class="num"><b>${fmt(remaining)}</b></td>
-      <td>${esc(d.date)}</td>
-      <td>${d.due_date ? esc(d.due_date) + (overdue ? ' <span class="bdg" style="color:var(--m-coral,#e8654a)">逾期</span>' : "") : '<span class="sub">—</span>'}</td>
-      <td>${d.status === "settled" ? '<span class="sub">已还清</span>' : '<b>未还清</b>'}</td>
+      <td style="text-align:right" class="num sub">${fmt(d.repaid)}</td>
+      <td style="text-align:right" class="num"><b style="font-size:14px">${fmt(remaining)}</b></td>
+      <td class="num sub">${esc(d.date)}</td>
+      <td class="num">${d.due_date ? esc(d.due_date) + (overdue ? ' <span class="dbt-pill over">逾期</span>' : "") : '<span class="sub">—</span>'}</td>
+      <td>${d.status === "settled"
+            ? '<span class="dbt-pill settled">已还清</span>'
+            : '<span class="dbt-pill open">未还清</span>'}</td>
       <td style="white-space:nowrap;text-align:right">
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="repaysOpen(${d.id}, ${qEsc(d.person)}, '${d.direction}')">明细</button>
-        ${d.status === "open" ? `<button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="repayOpen(${d.id}, ${qEsc(d.person)}, '${d.direction}', ${remaining})">还款</button>` : ""}
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="debtEdit(${d.id})">编辑</button>
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:12px" onclick="debtDel(${d.id}, ${qEsc(d.person)})">删</button>
+        <button class="btn btn-ghost dbt-btn" onclick="repaysOpen(${d.id}, '${qEsc(d.person)}', '${d.direction}')">明细</button>
+        ${d.status === "open" ? `<button class="btn dbt-btn dbt-repay" onclick="repayOpen(${d.id}, '${qEsc(d.person)}', '${d.direction}', ${remaining})">还款</button>` : ""}
+        <button class="btn btn-ghost dbt-btn" onclick="debtEdit(${d.id})">编辑</button>
+        <button class="btn btn-ghost dbt-btn" onclick="debtDel(${d.id}, '${qEsc(d.person)}')">删</button>
       </td></tr>`;
   }).join("");
   $("#debtEmpty").style.display = rows.length ? "none" : "block";

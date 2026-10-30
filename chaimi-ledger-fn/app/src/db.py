@@ -112,7 +112,8 @@ CREATE TABLE IF NOT EXISTS recurrences (
   account_id INTEGER,
   to_account_id INTEGER,
   note TEXT,
-  next_date TEXT,                   -- 下次到期日 YYYY-MM-DD
+  next_date TEXT,                   -- 下次记账日 YYYY-MM-DD（周期到这天记一笔）
+  end_date TEXT,                    -- 到日期：过了这天不再自动记账（NULL=一直记）
   last_tx_id INTEGER,               -- 最近一次生成流水 id（审计）
   last_run_date TEXT,               -- 最近一次实际触发日（审计）
   created TEXT DEFAULT (datetime('now')),
@@ -302,6 +303,8 @@ def init_db() -> None:
                        "ALTER TABLE ledgers ADD COLUMN budget INTEGER DEFAULT 0")
         _ensure_column(conn, "transactions", "manual_cat",
                        "ALTER TABLE transactions ADD COLUMN manual_cat INTEGER DEFAULT 0")
+        _ensure_column(conn, "recurrences", "end_date",
+                       "ALTER TABLE recurrences ADD COLUMN end_date TEXT")
         conn.execute("UPDATE attribution_groups SET avatar='f' WHERE avatar=''")
         if conn.execute("SELECT COUNT(*) FROM ledgers").fetchone()[0] == 0:
             seed()

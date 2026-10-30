@@ -88,7 +88,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="柴米记账", lifespan=lifespan)
 
 _AUTH_EXEMPT = ("/healthz", "/login", "/api/login", "/api/app/rules",
-                "/static/base.css", "/images/login-cow.png")   # 探活 + 登录页自身及其样式/图标 + 规则分发（公开纯数据）；其余一律过门
+                "/static/base.css", "/images/login-cow.png",
+                "/favicon.ico", "/apple-touch-icon.png")   # 探活 + 登录页自身及其样式/图标 + 规则分发（公开纯数据）+ 站点图标；其余一律过门
 # 自带 Bearer Token 鉴权的网关端点：web_auth 门凭 Token 等价放行（status/test 无自带鉴权，仍过门）
 _BOT_TOKEN_PATHS = ("/api/bot/message", "/api/bot/receipt", "/api/app/record")
 
@@ -319,6 +320,20 @@ def app_image(name: str):
     """应用图片：app/server/images 目录。
     禁缓存——后期直接替换同名文件（如换新头像）刷新即生效，无需改代码。"""
     return _no_cache_file(_IMAGES, name)
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """站点图标：浏览器标签页/收藏夹自动请求的固定路径。
+    以前没这条路由：请求落进 web_auth 门拿 401（未登录）或 404，标签页一片空白。
+    PNG 内容配 image/png 即可直接当 .ico 用，现代浏览器都认。"""
+    return FileResponse(_IMAGES / "login-cow-64.png", media_type="image/png",
+                        headers={"Cache-Control": "no-cache"})
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+def apple_touch_icon():
+    """iOS 添加到主屏用的图标（180×180 由系统缩放）。"""
+    return FileResponse(_IMAGES / "icon-256.png", media_type="image/png",
+                        headers={"Cache-Control": "no-cache"})
 
 @app.get("/healthz")
 def healthz():
@@ -1065,7 +1080,7 @@ def delete_repay(rid: int):
 def list_repays(did: int):
     return debtsm.repays_of(conn(), did)
 
-# ---------- 周期自动记账（到期由后台线程生成流水，见 recurrence.py） ----------
+# ---------- 周期自动记账（到记账日由后台线程生成流水，见 recurrence.py） ----------
 
 class RecurIn(BaseModel):
     name: str
@@ -1079,7 +1094,8 @@ class RecurIn(BaseModel):
     account_id: Optional[int] = None
     to_account_id: Optional[int] = None
     note: Optional[str] = None
-    start_date: Optional[str] = None   # 首次到期日，缺省今天
+    start_date: Optional[str] = None   # 首次记账日；缺省=按周期从今天推算下一个记账日
+    end_date: Optional[str] = None     # 到日期：过了这天不再自动记账（NULL=一直记）
     enabled: bool = True
 
 class RecurUpIn(BaseModel):
@@ -1095,6 +1111,8 @@ class RecurUpIn(BaseModel):
     to_account_id: Optional[int] = None
     note: Optional[str] = None
     enabled: Optional[bool] = None
+    start_date: Optional[str] = None   # 直接改写 next_date（首期对齐用）
+    end_date: Optional[str] = None     # 到日期：过了这天不再自动记账；空串/NULL=一直记
 
 @app.get("/api/recurrences")
 def list_recurrences(ledger: int):
@@ -1110,19 +1128,31 @@ def add_recurrence(ledger: int, body: RecurIn):
             raise ValueError("type 须为 expense/income/transfer")
         if int(body.amount) <= 0:
             raise ValueError("金额须大于 0")
-        start = body.start_date or datetime.now().strftime("%Y-%m-%d")
-        date.fromisoformat(start)
+        # 首个记账日：显式给了就用；没给则由 first_due 取"最近一个合规日期"
+        # （next_period 是从已对齐日期往后推，直接用它会把本月底的日期推到下月）
+        if body.start_date:
+            start = body.start_date
+            date.fromisoformat(start)
+        else:
+            start = recm.first_due(datetime.now().strftime("%Y-%m-%d"),
+                                   body.frequency, body.interval,
+                                   body.weekday, body.day_of_month)
+        end = (body.end_date or "").strip() or None
+        if end:
+            date.fromisoformat(end)
+            if end < start:
+                raise ValueError("到日期不能早于首个记账日")
     except ValueError as e:
         raise HTTPException(400, str(e))
     with conn() as c:
         cur = c.execute(
             """INSERT INTO recurrences(ledger_id, enabled, name, type, amount, frequency,
                interval, weekday, day_of_month, category_id, account_id, to_account_id,
-               note, next_date) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               note, next_date, end_date) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (ledger, 1 if body.enabled else 0, body.name.strip(), body.type, body.amount,
              body.frequency, body.interval, body.weekday, body.day_of_month,
              body.category_id, body.account_id, body.to_account_id,
-             (body.note or "").strip() or None, start))
+             (body.note or "").strip() or None, start, end))
     return {"id": cur.lastrowid}
 
 @app.put("/api/recurrences/{rid}")
@@ -1136,10 +1166,46 @@ def update_recurrence(rid: int, body: RecurUpIn):
                       f.get("interval", row["interval"]),
                       f.get("weekday", row["weekday"]),
                       f.get("day_of_month", row["day_of_month"]))
+        # 记账日（next_date）三态：
+        #  a) 只改名称/金额等 → 不动记账日
+        #  b) 显式改日期（start_date != 原 next_date）→ 照填
+        #  c) 改了周期但日期没动（编辑弹窗预填的就是原 next_date）→ 按新周期从今天重算，
+        #     否则"每月 20 号"改成"25 号"后，下次记账还停在旧日期上
+        # 注意判据必须是「值真的变了」：前端编辑会把全部字段一起提交，用「字段是否出现」
+        # 当变化会把手改日期误判成没改。
+        sched = ("frequency", "interval", "weekday", "day_of_month")
+        sched_changed = any(k in f and f[k] != row[k] for k in sched)
+        today = datetime.now().strftime("%Y-%m-%d")
+        new_next = recm.next_period(today,
+                                    f.get("frequency", row["frequency"]),
+                                    f.get("interval", row["interval"]),
+                                    f.get("weekday", row["weekday"]),
+                                    f.get("day_of_month", row["day_of_month"]))
+        if f.get("start_date"):
+            date.fromisoformat(f["start_date"])
+            if sched_changed and f["start_date"] == row["next_date"]:
+                f["next_date"] = new_next            # 日期没动，周期变了
+            else:
+                f["next_date"] = f["start_date"]     # 用户手改了日期
+            f.pop("start_date")
+        elif sched_changed:
+            f["next_date"] = new_next
+        # 到日期：空串=清空（一直记）；早于下次记账日则直接把规则停用，不再产生流水
+        if "end_date" in f:
+            end = (f["end_date"] or "").strip() or None
+            if end:
+                date.fromisoformat(end)
+                if end < (f.get("next_date") or row["next_date"]):
+                    f["enabled"] = 0
+            f["end_date"] = end
     except ValueError as e:
         raise HTTPException(400, str(e))
     if "name" in f and not f["name"].strip():
         raise HTTPException(400, "名称不能为空")
+    if "amount" in f and int(f["amount"]) <= 0:
+        raise HTTPException(400, "金额须大于 0")
+    if "type" in f and f["type"] not in ("expense", "income", "transfer"):
+        raise HTTPException(400, "type 须为 expense/income/transfer")
     if f:
         sets = ", ".join(f"{k}=?" for k in f)
         with conn() as c:
@@ -1157,7 +1223,7 @@ def delete_recurrence(rid: int):
 
 @app.post("/api/recurrences/{rid}/run")
 def run_recurrence(rid: int):
-    """手动记一期（试跑/提前记）：到期未触发按到期日，否则按今天；节奏锚不变。"""
+    """手动记一期（试跑/提前记）：已过记账日就按那天记，否则按今天；节奏锚不变。"""
     with conn() as c:
         r = c.execute("SELECT * FROM recurrences WHERE id=?", (rid,)).fetchone()
         if not r:

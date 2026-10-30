@@ -509,3 +509,108 @@ th{color:var(--muted);font-weight:500;font-size:12px}
   font-size:13px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .15s}
 .dd-c:hover{background:var(--hover)}
 .dd-c.sel{color:var(--primary-fg);background:var(--primary-bg);font-weight:600}
+
+/* ===== 借出借入 · 台账页（按钮 / 汇总卡 / 表格行） ===== */
+/* 顶部操作按钮：淡色填充 + 语义色描边 + ➕ 图标，hover 有浮起阴影 */
+.btn-debt{display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 17px 0 14px;
+  border-radius:11px;border:1px solid transparent;font-size:13.5px;font-weight:600;
+  transition:background .18s,box-shadow .18s,transform .12s}
+.btn-debt svg{flex:none;margin-top:-1px}
+.btn-debt.out{color:var(--expense);background:rgba(208,64,79,.10);border-color:rgba(208,64,79,.22)}
+.btn-debt.out:hover{background:rgba(208,64,79,.17);box-shadow:0 5px 14px -6px rgba(208,64,79,.55);transform:translateY(-1px)}
+.btn-debt.in{color:var(--income);background:rgba(35,133,90,.10);border-color:rgba(35,133,90,.22)}
+.btn-debt.in:hover{background:rgba(35,133,90,.17);box-shadow:0 5px 14px -6px rgba(35,133,90,.55);transform:translateY(-1px)}
+[data-theme="dark"] .btn-debt.out{background:rgba(232,117,133,.14);border-color:rgba(232,117,133,.3)}
+[data-theme="dark"] .btn-debt.in{background:rgba(122,207,160,.14);border-color:rgba(122,207,160,.3)}
+
+/* 汇总卡 */
+.debt-stat{flex:1;min-width:158px;margin:0;padding:14px 16px;border-radius:14px;
+  border:1px solid var(--border);background:var(--card);box-shadow:var(--shadow)}
+.debt-stat.out{background:linear-gradient(155deg,rgba(208,64,79,.085),var(--card) 62%)}
+.debt-stat.in{background:linear-gradient(155deg,rgba(35,133,90,.085),var(--card) 62%)}
+.debt-stat.warn{background:linear-gradient(155deg,rgba(232,149,107,.13),var(--card) 62%)}
+.debt-stat .dt-label{font-size:12px;color:var(--muted);letter-spacing:.2px}
+.debt-stat .dt-val{font-size:22px;font-weight:700;line-height:1.25;margin:5px 0 3px;color:var(--fg)}
+.debt-stat .dt-meta{font-size:11.5px;color:var(--muted)}
+
+/* 表格 */
+#debtTable{margin-top:4px}
+#debtTable th{background:var(--bg);font-size:11.5px;letter-spacing:.3px;padding:9px 12px;
+  border-bottom:1px solid var(--border)}
+#debtTable td{padding:11px 12px}
+#debtTable tbody tr{transition:background .15s}
+#debtTable tbody tr:hover{background:var(--hover)}
+.dbt-dir{display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px}
+.dbt-dir.out{background:rgba(208,64,79,.11);color:var(--expense)}
+.dbt-dir.in{background:rgba(35,133,90,.11);color:var(--income)}
+.dbt-pill{display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px}
+.dbt-pill.open{background:rgba(232,149,107,.15);color:var(--m-peach-fg)}
+.dbt-pill.settled{background:rgba(93,191,138,.16);color:var(--m-mint-fg)}
+.dbt-pill.over{background:rgba(208,64,79,.14);color:var(--expense)}
+.dbt-btn{padding:3px 10px;font-size:12px;border-radius:8px}
+.dbt-repay{background:var(--primary);color:var(--on-primary);border:none;font-weight:600;
+  box-shadow:0 4px 10px -5px var(--primary-fg)}
+.dbt-repay:hover{background:var(--primary-fg);opacity:1}
+/* 借出借入页的 .row：该页不在 .st-sec 内，需要自己撑成横向排布 */
+#tab-debts .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dbt-repay{background:linear-gradient(135deg,var(--primary),var(--primary-2));box-shadow:0 4px 10px -6px var(--primary-fg)}
+/* 借出借入表格：窄屏横向滚动（9 列在手机上必然放不下，宁可滑动不压缩） */
+#tab-debts .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+#tab-debts .tbl-scroll::-webkit-scrollbar{height:6px}
+#tab-debts .tbl-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+#debtTable td{white-space:nowrap}
+#debtTable th{white-space:nowrap}
+@media(max-width:768px){
+  #tab-debts .tbl-scroll{margin:0 -18px;padding:0 18px}   /* 滑到卡片边缘，视觉更宽 */
+  #debtTable{min-width:700px}
+  #tab-debts #debtCards{gap:8px;flex-wrap:nowrap}
+  #tab-debts .debt-stat{min-width:0;padding:10px 11px}
+  #tab-debts .debt-stat .dt-val{font-size:16px;margin:3px 0 2px}
+  #tab-debts .debt-stat .dt-meta{display:none}
+  #tab-debts .debt-stat .dt-label{font-size:11px}
+}
+
+/* ===== 周期记账页 ===== */
+.pg-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.pg-head-txt{min-width:0}
+.pg-title{font-size:16px;font-weight:700;color:var(--fg)}
+.pg-head .sub{margin-top:5px;line-height:1.65;max-width:640px}
+.btn-add{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 16px 0 13px;border-radius:10px;
+  font-size:13px;font-weight:600;color:#fff;background:linear-gradient(135deg,var(--primary),var(--primary-2));
+  border:none;box-shadow:0 5px 14px -7px var(--primary-fg);transition:transform .12s,box-shadow .18s}
+.btn-add:hover{transform:translateY(-1px);box-shadow:0 8px 18px -7px var(--primary-fg)}
+.btn-add svg{flex:none;margin-top:-1px}
+#tab-recur .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#tab-recur .tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+#recurTable{margin-top:14px}
+#recurTable th{background:var(--bg);font-size:11.5px;letter-spacing:.3px;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
+#recurTable td{padding:11px 12px;white-space:nowrap;border-bottom:1px solid var(--border)}
+#recurTable tbody tr{transition:background .15s}
+#recurTable tbody tr:hover{background:var(--hover)}
+.dbt-dir.tr{background:var(--m-gray-100);color:var(--m-gray-fg)}
+.dbt-pill.off{background:var(--m-gray-100);color:var(--m-gray-fg)}
+/* 开关（替代裸 checkbox） */
+.switch{display:inline-flex;align-items:center;cursor:pointer;vertical-align:middle;margin-right:4px}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch i{width:34px;height:20px;border-radius:999px;background:var(--border);position:relative;
+  transition:background .18s;display:inline-block}
+.switch i::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s}
+.switch input:checked + i{background:var(--primary)}
+.switch input:checked + i::after{transform:translateX(14px)}
+@media(max-width:768px){
+  #tab-recur .tbl-scroll{margin:0 -18px;padding:0 18px}
+  #recurTable{min-width:680px}
+  #tab-recur #recurCards{gap:8px;flex-wrap:nowrap}
+  #tab-recur .debt-stat{min-width:0;padding:10px 11px}
+  #tab-recur .debt-stat .dt-val{font-size:16px;margin:3px 0 2px}
+  #tab-recur .debt-stat .dt-meta{display:none}
+  #tab-recur .debt-stat .dt-label{font-size:11px}
+}
+.dbt-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--m-peach);
+  margin-left:6px;vertical-align:2px;box-shadow:0 0 0 3px rgba(232,149,107,.18)}
+/* 表单字段下的说明小字（周期记账到期日等） */
+.hint{font-size:11.5px;color:var(--muted);line-height:1.6;margin:-2px 0 10px}
+/* 周期规则弹窗：下次记账预览 */
+.next-hint{font-size:12.5px;color:var(--primary-fg);background:var(--primary-bg);
+  border-radius:8px;padding:7px 11px;margin:10px 0 2px;line-height:1.5}
