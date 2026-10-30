@@ -1901,10 +1901,13 @@ def bot_message(body: BotMsgIn, request: Request):
 class AppRecordIn(BaseModel):
     """记账桥（Android 无障碍 App）直记一笔的载荷：结构化字段，不走 LLM。
     金额单位为**分**（int）；pay_id 为客户端幂等键
-    sha256(包名|支付时间秒|金额分|商户前8字)，服务端据此兜底防重。"""
+    sha256(包名|支付时间秒|金额分|商户前8字)，服务端据此兜底防重。
+    App 侧确认框已让用户选过分类（category），解析到即直接入库（无二次确认）；
+    category 缺失且商户解析不到时才 need_confirm=1 进网页待确认队列。"""
     pay_id: str
     channel: str = "other"           # wechat | alipay | unionpay | sms | ...
     amount: int                      # 分
+    category: str = ""               # App 确认框选中的一级分类名（优先参与解析）
     merchant: str = ""
     pay_method: str = ""             # 支付方式原文（"零钱"→微信零钱 等账户靠它匹配）
     pay_time: str = ""               # YYYY-MM-DD 或 YYYY-MM-DD HH:MM；空=服务端当前时间
@@ -1955,18 +1958,25 @@ def app_record(body: AppRecordIn, request: Request):
 
     merchant = (body.merchant or "").strip()[:60]
     pm = (body.pay_method or "").strip()
+    category = (body.category or "").strip()[:30]
     tx_type = body.tx_type
 
-    # 分类：学习映射（网页确认过一次的商户自动记住）→ 两段式名匹配 → None
+    # 分类：App 确认框选的分类（用户已确认，直接采信）→ 学习映射 → 两段式名匹配。
+    # 解析到 → need_confirm=0 直接入库（App 已确认，无二次确认）；
+    # 没选且商户也解析不到 → need_confirm=1 进网页待确认队列。
     cat_id = None
-    mrow = conn().execute(
-        "SELECT category_id FROM category_mappings WHERE ledger_id=? AND flow_type=? AND source=?",
-        (ledger, tx_type, merchant)).fetchone()
-    if mrow:
-        cat_id = mrow["category_id"]
-    else:
+    for source in (category, merchant):
+        if not source:
+            continue
+        mrow = conn().execute(
+            "SELECT category_id FROM category_mappings WHERE ledger_id=? AND flow_type=? AND source=?",
+            (ledger, tx_type, source)).fetchone()
+        if mrow:
+            cat_id = mrow["category_id"]
+            break
+    if cat_id is None:
         cat_id = bot_core.resolve_category(
-            ledger, tx_type, merchant or pm or body.channel)
+            ledger, tx_type, category or merchant or pm or body.channel)
 
     # 账户：pay_method 与账户名双向包含（"零钱"→微信零钱 等）；匹配不到留空
     account_id = None
