@@ -6,7 +6,7 @@ function stTab(name){
   document.querySelectorAll("#stTabs button").forEach(b=>b.classList.toggle("on", b.dataset.s===name));
   document.querySelectorAll(".st-sec").forEach(x=>x.classList.toggle("on", x.dataset.s===name));
 }
-document.querySelectorAll("#stTabs button").forEach(b=>b.onclick=()=>stTab(b.dataset.s));
+document.querySelectorAll("#stTabs button[data-s]").forEach(b=>b.onclick=()=>stTab(b.dataset.s));
 
 // 平台预设：切换后自动填入地址/模型名（Key 不覆盖，用户手填）
 const LLM_PRESETS=[

@@ -151,6 +151,12 @@ body{overflow:hidden}
 /* renqing 樱花粉 */
 .nav-item.on[data-p="renqing"]{background:var(--m-pink-100);color:var(--m-pink-fg)}
 .nav-item.on[data-p="renqing"]::before{background:var(--m-pink)}
+/* debts 青绿（借出借入） */
+.nav-item.on[data-p="debts"]{background:var(--m-teal-100);color:var(--m-teal-fg)}
+.nav-item.on[data-p="debts"]::before{background:var(--m-teal)}
+/* recur 奶黄（周期记账；原 io 配色，io 迁入设置后此项空出） */
+.nav-item.on[data-p="recur"]{background:var(--m-butter-100);color:var(--m-butter-fg)}
+.nav-item.on[data-p="recur"]::before{background:var(--m-butter)}
 /* settings 莫兰迪灰 */
 .nav-item.on[data-p="settings"]{background:var(--m-gray-100);color:var(--m-gray-fg)}
 .nav-item.on[data-p="settings"]::before{background:var(--m-gray)}
