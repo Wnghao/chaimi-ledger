@@ -49,25 +49,46 @@ def _locate(name: str):
     return src_file
 
 def create_backup(period: str = "") -> dict:
-    """period: ""=手动(完整时间戳) "monthly"=YYYYMM "yearly"=YYYY。
+    """period: ""=手动(完整时间戳) "daily"=YYYYMMDD "monthly"=YYYYMM "yearly"=YYYY。
     文件名统一 chaimi-ledger-<时间戳>.db/.conf.json，手动与自动仅时间戳粒度不同。
     小票一并备份：打包为同名 .receipts.zip（目录为空则不生成）。"""
     bdir = config.backup_dir()
     bdir.mkdir(parents=True, exist_ok=True)
     now = datetime.now()
-    if period == "monthly":
+    if period == "daily":
+        stamp = now.strftime("%Y%m%d")
+    elif period == "monthly":
         stamp = now.strftime("%Y%m")
     elif period == "yearly":
         stamp = now.strftime("%Y")
     else:
         stamp = now.strftime("%Y%m%d_%H%M%S")
     dest = bdir / f"chaimi-ledger-{stamp}.db"
-    src = sqlite3.connect(config.db_path())
+    # 源库必须真实存在且有流水表：sqlite3.connect 对不存在的路径会**创建空库**，
+    # 这条链路曾产出过 4KB 空备份（恢复即清账）。宁可抛错也不生成垃圾备份。
+    db_file = config.db_path()
+    if not db_file.is_file():
+        raise ValueError(f"数据库文件不存在，已中止备份：{db_file}")
+    src = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+    try:
+        src.execute("SELECT 1 FROM transactions LIMIT 1")
+    except sqlite3.Error as e:
+        src.close()
+        dest.unlink(missing_ok=True)
+        raise ValueError(f"数据库缺少流水表，已中止备份：{e}") from e
     dst = sqlite3.connect(dest)
     with dst:
         src.backup(dst)
     dst.close()
     src.close()
+    # 备份文件必须自包含：源库是 WAL，backup 会把 WAL 标志一起带过去，
+    # 之后只要被打开就在旁边生成 -wal/-shm（历史上备份目录里攒过一堆这种残渣），
+    # 且只拷 .db 时可能丢 -wal 里的数据。转成 DELETE 模式后 .db 即完整快照。
+    fix = sqlite3.connect(dest)
+    try:
+        fix.execute("PRAGMA journal_mode=DELETE")
+    finally:
+        fix.close()
     # 配置副本
     conf = config.conf_path()
     if conf.exists():
@@ -80,28 +101,66 @@ def create_backup(period: str = "") -> dict:
                 z.write(f, f.name)
     return {"file": str(dest), "size": dest.stat().st_size}
 
+def _backup_kind(name: str) -> str:
+    """按文件名词长判定类型：manual(YYYYMMDD_HHMMSS) / daily(YYYYMMDD) /
+    monthly(YYYYMM) / yearly(YYYY) / unknown。"""
+    if _DAY_FILE.match(name):
+        return "daily"
+    if _MONTH_FILE.match(name):
+        return "monthly"
+    if _YEAR_FILE.match(name):
+        return "yearly"
+    if re.match(r"^chaimi-ledger-\d{8}_\d{6}\.db$", name):
+        return "manual"
+    return "unknown"
+
+def _backup_probe(f) -> tuple[bool, int]:
+    """只读探测备份库：返回 (是否有效, 流水笔数)。
+    以 mode=ro 打开——普通连接会在备份旁生成 -wal/-shm 残渣（历史上出现过）。
+    空库（无 transactions 表或 0 笔）判为无效：这种备份恢复等于清账。"""
+    try:
+        c = sqlite3.connect(f"file:{f}?mode=ro", uri=True)
+        try:
+            n = c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+            return True, int(n)
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return False, 0
+
 def list_backups() -> list[dict]:
+    """备份列表（设置页用）：文件名/类型/时间/大小/流水笔数/是否有效。
+    有效性直接读库探测，空库或损坏文件前端标红禁恢复。"""
     bdir = config.backup_dir()
     out = []
     if bdir.exists():
         for f in sorted(bdir.glob("chaimi-*.db"), reverse=True):
+            valid, n = _backup_probe(f)
             out.append({"file": f.name, "size": f.stat().st_size,
-                        "mtime": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")})
+                        "mtime": datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                        "type": _backup_kind(f.name), "tx_count": n, "valid": valid})
     return out
 
 def restore_backup(name: str) -> None:
-    """恢复：校验文件名安全 + integrity_check 通过才覆盖。"""
+    """恢复：文件名安全 + integrity_check 通过 + 非空库（有 transactions 表且笔数>0）才覆盖。
+    空库校验是硬门槛——空 SQLite 文件能通过 integrity_check，过去一旦点恢复就等于清账。"""
     src_file = _locate(name)
     # 先校验备份完整性；非 SQLite 文件统一转 ValueError（server 映射 400，不再裸 500）
-    chk = sqlite3.connect(src_file)
+    chk = sqlite3.connect(f"file:{src_file}?mode=ro", uri=True)
     try:
         ok = chk.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        try:
+            n_tx = chk.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        except sqlite3.Error:
+            n_tx = -1
     except sqlite3.DatabaseError as e:
         raise ValueError(f"备份文件不是有效的 SQLite 数据库: {e}") from e
     finally:
         chk.close()
     if not ok:
         raise ValueError("备份文件完整性校验失败")
+    if n_tx <= 0:
+        raise ValueError("该备份里没有任何流水（空库），已拒绝恢复以免清空账本")
     # 旧实现"临时文件替换 db"在 Linux 下各线程缓存的旧连接仍读旧 inode（恢复"看似没生效"的根因），
     # 在 Windows 下直接被旧句柄锁死无法替换；backup 写同一文件，所有连接立即可见
     target = config.db_path()
@@ -142,19 +201,34 @@ def delete_backup(name: str) -> None:
 
 _MONTH_FILE = re.compile(r"^chaimi-ledger-(\d{6})\.db$")
 _YEAR_FILE = re.compile(r"^chaimi-ledger-(\d{4})\.db$")
+_DAY_FILE = re.compile(r"^chaimi-ledger-(\d{8})\.db$")
 
-def _cleanup_old(keep: int, now: datetime, *, yearly: bool) -> None:
-    """周期备份按保留数清理（月备按月数、年备按年数）：
-    删除过期的主文件与全部同名副文件（.conf.json/.receipts.zip，两侧同一口径）。"""
+def _cleanup_old(keep: int, now: datetime, kind: str = "monthly") -> None:
+    """周期备份按保留数清理（daily 按天数 / monthly 按月数 / yearly 按年数）：
+    删除过期的主文件与全部同名副文件（.conf.json/.receipts.zip，两侧同一口径）。
+    只匹配对应粒度的文件名——手动备份（YYYYMMDD_HHMMSS）永不在此被清理。"""
     if keep <= 0:
         return
-    pat = _YEAR_FILE if yearly else _MONTH_FILE
+    if kind == "daily":
+        pat, size = _DAY_FILE, 8
+    elif kind == "yearly":
+        pat, size = _YEAR_FILE, 4
+    else:
+        pat, size = _MONTH_FILE, 6
     for f in config.backup_dir().glob("chaimi-ledger-*.db"):
         m = pat.match(f.name)
         if not m:
             continue
         n = int(m.group(1))
-        age = (now.year - n) if yearly else (now.year * 12 + now.month) - (n // 100 * 12 + n % 100)
+        if size == 8:      # YYYYMMDD
+            try:
+                age = (now.date() - datetime.strptime(str(n), "%Y%m%d").date()).days
+            except ValueError:
+                continue
+        elif size == 4:    # YYYY
+            age = now.year - n
+        else:              # YYYYMM
+            age = (now.year * 12 + now.month) - (n // 100 * 12 + n % 100)
         if age >= keep:
             f.unlink(missing_ok=True)
             for suffix in _SIDE_SUFFIXES:
@@ -306,8 +380,10 @@ def webdav_download(name: str) -> dict:
     return {"ok": True, "file": name, "size": len(data)}
 
 class AutoBackup:
-    """自动备份：到配置 hour 点检查——年末(12-31)优先生成年备并跳过月备；
-    其余月末生成本月月备。保留按月数/年数分层清理，只清周期文件。
+    """自动备份：每天到配置 hour 点生成一份**日备**（文件名 chaimi-ledger-YYYYMMDD.db）；
+    当天是月末再加一份月备（YYYYMM）、12-31 再加年备（YYYY）。
+    保留策略分层：keep_days 天日备 / keep_months 个月备 / keep_years 个年备。
+    触发用 now.hour >= hour（不是 ==）：容器在到点前后重启也不会漏掉当天这一次。
     每轮重读配置，设置页改参数即时生效。"""
 
     def __init__(self):
@@ -323,19 +399,24 @@ class AutoBackup:
             try:
                 now = datetime.now()
                 today = now.strftime("%Y-%m-%d")
-                if (cfg.get("enabled") and int(cfg.get("hour", 3)) == now.hour
-                        and self._last_date != today
-                        and _is_last_day_of_month(now)):
+                hour = int(cfg.get("hour", 3))
+                if cfg.get("enabled") and now.hour >= hour and self._last_date != today:
                     self._last_date = today
+                    keep_days = int(cfg.get("keep_days", 7))
+                    if keep_days > 0:
+                        self.last_result = create_backup("daily")
+                        _cleanup_old(keep_days, now, kind="daily")
+                        self._webdav_auto()
+                        _webdav_prune(keep_days, now)
                     if now.month == 12 and now.day == 31:
                         # 12-31 年备优先（年备已覆盖当月），跳过月备
                         if int(cfg.get("keep_years", 3)) > 0:
                             self.last_result = create_backup("yearly")
-                            _cleanup_old(int(cfg.get("keep_years", 3)), now, yearly=True)
+                            _cleanup_old(int(cfg.get("keep_years", 3)), now, kind="yearly")
                             self._webdav_auto()
-                    elif int(cfg.get("keep_months", 3)) > 0:
+                    elif _is_last_day_of_month(now) and int(cfg.get("keep_months", 3)) > 0:
                         self.last_result = create_backup("monthly")
-                        _cleanup_old(int(cfg.get("keep_months", 3)), now, yearly=False)
+                        _cleanup_old(int(cfg.get("keep_months", 3)), now, kind="monthly")
                         self._webdav_auto()
             except Exception as e:  # 备份失败不中断循环
                 self.last_result = {"error": str(e)[:300]}
@@ -354,3 +435,33 @@ class AutoBackup:
         except Exception as e:
             self.last_result["webdav_error"] = str(e)[:200]
             _log.warning(f"WebDAV 上传失败：{e}")
+
+def _webdav_prune(keep_days: int, now: datetime) -> None:
+    """远端日备按保留天数清理（本地删掉的不一定同步删掉，否则 OpenList 里会每天涨一个）。
+    只动 chaimi-ledger-YYYYMMDD.* 这类日备；月备/年备/手动备份远端一律不碰。"""
+    if keep_days <= 0:
+        return
+    cfg = _webdav_cfg()
+    if not cfg.get("url"):
+        return
+    try:
+        files = webdav_list()
+    except Exception:
+        return
+    for it in files:
+        m = _DAY_FILE.match(it.get("file") or "")
+        if not m:
+            continue
+        try:
+            age = (now.date() - datetime.strptime(m.group(1), "%Y%m%d").date()).days
+        except ValueError:
+            continue
+        if age < keep_days:
+            continue
+        base = Path(it["file"]).stem
+        for fn in (f"{base}.db", f"{base}.conf.json", f"{base}.receipts.zip"):
+            try:
+                _dav_open("DELETE", _dav_url(cfg, cfg.get("dir") or "", fn), cfg)
+            except Exception:
+                pass
+    _log.info(f"WebDAV 远端清理：保留最近 {keep_days} 天日备")

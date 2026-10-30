@@ -19,11 +19,12 @@ DEFAULTS: dict = {
         "vl_base_url": "",
         "vl_api_key": "",
     },
-    # 自动备份（月末/年末分层）：hour 点检查；月末生成本月月备，12-31 年备优先；
-    # keep_months/keep_years 为保留的月数/年数，0=关闭该周期
+    # 自动备份（每日 + 月末/年末分层）：每天 hour 点生成日备（YYYYMMDD）；月末加月备，
+    # 12-31 年备优先；keep_days/keep_months/keep_years 为保留数，0=关闭该周期
     "backup": {
         "enabled": True,
         "hour": 3,
+        "keep_days": 7,
         "keep_months": 3,
         "keep_years": 3,
     },

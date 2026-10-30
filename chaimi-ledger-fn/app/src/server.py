@@ -1707,6 +1707,7 @@ def put_config(body: dict):
         old.pop("keep", None)  # 清掉旧版字段
         old["enabled"] = bool(b.get("enabled", old["enabled"]))
         old["hour"] = _cfg_int(b, old, "hour", 0, 23)
+        old["keep_days"] = _cfg_int(b, old, "keep_days", 0, 365)
         old["keep_months"] = _cfg_int(b, old, "keep_months", 0, 480)
         old["keep_years"] = _cfg_int(b, old, "keep_years", 0, 100)
     if isinstance(body.get("bot"), dict):

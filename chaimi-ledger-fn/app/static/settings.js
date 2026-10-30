@@ -342,25 +342,36 @@ async function delAcc(id){
   if(!await uiConfirm(tip, "删除")) return;
   await api(`/api/accounts/${id}`,{method:"DELETE"});stAccs();loadAccs();
 }
+const BK_TYPE = {daily: "日备", monthly: "月备", yearly: "年备", manual: "手动", unknown: "其他"};
 async function loadBks(){
   const bs=await api("/api/backups");
-  document.querySelector("#bkTable tbody").innerHTML=bs.map(b=>
-    `<tr><td>${esc(b.mtime)}</td><td class="num">${(b.size/1024).toFixed(0)} KB</td>
-     <td><button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="location.href='api/backups/download?file=${encodeURIComponent(b.file)}'">下载</button>
-     <button class="btn danger" style="padding:4px 10px;font-size:12px" onclick="restore('${qEsc(b.file)}')">恢复</button>
-     <button class="btn danger" style="padding:4px 10px;font-size:12px" onclick="delBk('${qEsc(b.file)}')">删除</button></td></tr>`).join("")||'<tr><td colspan="3" class="sub">暂无备份</td></tr>';
+  document.querySelector("#bkTable tbody").innerHTML = bs.map(b=>{
+    const bad = !b.valid || !(b.tx_count > 0);
+    const badge = bad ? '<span class="tag" style="flex:none;background:var(--m-peach-50);color:var(--m-peach-fg)">空库/损坏</span>' : "";
+    return `<tr style="${bad ? "opacity:.7" : ""}">
+      <td style="max-width:240px"><div style="display:flex;align-items:center;gap:6px;min-width:0">
+        <span title="${esc(b.file)}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(b.file)}</span>${badge}</div></td>
+      <td>${BK_TYPE[b.type] || b.type || "—"}</td><td>${esc(b.mtime)}</td>
+      <td class="num">${bad ? "—" : (b.tx_count || 0) + " 笔"}</td>
+      <td class="num">${(b.size/1024).toFixed(0)} KB</td>
+      <td><button class="btn btn-ghost" style="padding:4px 10px;font-size:12px" onclick="location.href='api/backups/download?file=${encodeURIComponent(b.file)}'">下载</button>
+      <button class="btn danger" style="padding:4px 10px;font-size:12px" ${bad ? "disabled title=\"空库无法恢复（会清空账本）\"" : ""} onclick="restore('${qEsc(b.file)}')">恢复</button>
+      <button class="btn danger" style="padding:4px 10px;font-size:12px" onclick="delBk('${qEsc(b.file)}')">删除</button></td></tr>`;
+  }).join("") || '<tr><td colspan="6" class="sub">暂无备份</td></tr>';
 }
 function dlLogs(){location.href="api/logs/download";}
 async function loadBkCfg(){
   const c = await getCfg();
   $("#bk_enabled").checked=!!c.backup.enabled;
   $("#bk_hour").value=c.backup.hour;
+  $("#bk_days").value=c.backup.keep_days ?? 7;
   $("#bk_months").value=c.backup.keep_months;
   $("#bk_years").value=c.backup.keep_years;
 }
 async function saveBkCfg(){
   await apiSend("/api/config","PUT",{backup:{
     enabled:$("#bk_enabled").checked, hour:$("#bk_hour").value===""?3:+$("#bk_hour").value,
+    keep_days:$("#bk_days").value===""?7:+$("#bk_days").value,
     keep_months:$("#bk_months").value===""?0:+$("#bk_months").value, keep_years:$("#bk_years").value===""?0:+$("#bk_years").value}});
   _cfgCache = null;
   msg("自动备份已保存 ✅");

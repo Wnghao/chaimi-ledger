@@ -486,16 +486,17 @@
             <input type="checkbox" id="bk_enabled" style="width:auto"><label style="margin:0" for="bk_enabled">自动备份</label>
           </div>
           <div><label>每天几点</label><input id="bk_hour" type="number" min="0" max="23" step="1"></div>
+          <div><label>日备保留（天）</label><input id="bk_days" type="number" min="0" max="365" step="1"></div>
           <div><label>月备保留（月）</label><input id="bk_months" type="number" min="0" max="480" step="1"></div>
           <div><label>年备保留（年）</label><input id="bk_years" type="number" min="0" max="100" step="1"></div>
           <button class="btn btn-ghost" style="flex:0 0 auto" onclick="saveBkCfg()">保存</button>
         </div>
-        <div class="sub" style="margin-bottom:8px">月备份在每月最后一天生成（chaimi-ledger-年月.db），年备份在每年 12 月 31 日生成（chaimi-ledger-年.db，当天不再重复月备）；保留数按月数/年数计，超出即自动清理，填 0 表示关闭该周期。手动备份不受保留策略影响。</div>
-        <table id="bkTable"><thead><tr><th>时间</th><th>大小</th><th></th></tr></thead><tbody></tbody></table>
+        <div class="sub" style="margin-bottom:8px">每天到点生成一份日备（chaimi-ledger-年月日.db，过期按天清理）；月末再加一份月备（chaimi-ledger-年月.db）、每年 12 月 31 日生成年备（当天不再重复月备）。保留数填 0 表示关闭该周期；手动备份不受保留策略影响，也不参与清理。</div>
+        <table id="bkTable"><thead><tr><th>备份文件</th><th>类型</th><th>时间</th><th class="num">流水</th><th class="num">大小</th><th></th></tr></thead><tbody></tbody></table>
         <div class="sub" style="margin-top:8px;color:var(--expense)">恢复将覆盖当前全部数据（含 AI 配置），请谨慎操作。</div>
       </div>
       <div class="card" style="margin-top:14px"><h2 class="st-h2">WebDAV 备份（可选）</h2>
-        <div class="sub" style="margin-bottom:8px">把备份文件同步到你自己的 WebDAV 服务（坚果云 / 群晖 / Alist 等），异地容灾。密码与本机其他密钥同级存储；开启「自动上传」后，每月/每年自动备份生成时会同步上传远端。</div>
+        <div class="sub" style="margin-bottom:8px">把备份文件同步到你自己的 WebDAV 服务（坚果云 / 群晖 / Alist 等），异地容灾。密码与本机其他密钥同级存储；开启「自动上传」后，每天/每月/每年自动备份生成时同步上传远端，远端日备按「日备保留」天数同步清理。</div>
         <div class="row" style="align-items:end;gap:8px;flex-wrap:wrap">
           <div style="flex:2;min-width:200px"><label>服务地址</label><input id="wd_url" placeholder="https://dav.jianguoyun.com/dav/"></div>
           <div><label>远端目录</label><input id="wd_dir" placeholder="chaimi-ledger"></div>
