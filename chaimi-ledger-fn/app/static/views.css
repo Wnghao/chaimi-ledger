@@ -618,3 +618,16 @@ th{color:var(--muted);font-weight:500;font-size:12px}
 /* 周期规则弹窗：下次记账预览 */
 .next-hint{font-size:13px;color:var(--primary-fg);background:var(--primary-bg);
   border-radius:8px;padding:7px 11px;margin:10px 0 2px;line-height:1.5}
+
+/* 侧栏「当前账本」行：右侧挂 调色盘/明暗 两个小按钮；色板内嵌展开（非悬浮） */
+.ledger-box .lb-row{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.ledger-box .lb-row .sub{margin:0 0 0 2px}
+.lb-tools{display:flex;gap:4px}
+.lb-tools .icon-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:9px;color:var(--muted);transition:background .15s,color .15s}
+.lb-tools .icon-btn:hover{background:var(--hover);color:var(--fg)}
+.accent-panel{margin-top:8px;background:var(--chip);border-radius:12px;padding:10px 12px}
+.accent-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.accent-panel-t{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.5px}
+.accent-panel .accent-row{flex-wrap:wrap;gap:8px}
+.accent-panel-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}

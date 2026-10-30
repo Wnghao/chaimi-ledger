@@ -14,41 +14,29 @@ const today = () => new Date().toISOString().slice(0,10);
 document.body.dataset.accent = (function(){ try{ return localStorage.getItem("chaimi_accent") || "blue"; }catch(_){ return "blue"; } })();
 document.body.dataset.warm = (function(){ try{ return localStorage.getItem("chaimi_warm") || "on"; }catch(_){ return "on"; } })();
 function setWarm(v){ document.body.dataset.warm = v; try{ localStorage.setItem("chaimi_warm", v); }catch(_){} }
-function syncWarmToggle(){
-  const wt = document.body.dataset.warm || "on";
-  const on = document.querySelector("#warmOn"), off = document.querySelector("#warmOff");
-  if(on){ on.style.background = wt === "on" ? "var(--card)" : "none"; on.style.color = wt === "on" ? "var(--fg)" : "var(--muted)"; }
-  if(off){ off.style.background = wt === "off" ? "var(--card)" : "none"; off.style.color = wt === "off" ? "var(--fg)" : "var(--muted)"; }
-}
-function renderAccentDots(){
+function renderAccentPanel(){
   const ACCENTS = [["blue","海蓝"],["pink","樱粉"],["green","豆绿"],["purple","雾紫"],["peach","蜜桃"],["teal","青瓷"],["gray","暖灰"]];
-  const box = document.querySelector("#accentPickerPop");
+  const box = document.querySelector("#accentDots");
   if(!box) return;
   const cur = document.body.dataset.accent || "blue";
   const names = Object.fromEntries(ACCENTS);
   box.innerHTML = ACCENTS.map(([k, cn]) =>
-    `<button class="accent-dot ${k}${k===cur?" on":""}" title="${cn}" onclick="setAccent('${k}');renderAccentDots();refreshAccentDemo()"></button>`).join("")
+    `<button class="accent-dot ${k}${k===cur?" on":""}" title="${cn}" onclick="setAccent('${k}');renderAccentPanel();refreshAccentDemo()"></button>`).join("")
     + `<span class="accent-cur">${names[cur] || cur}</span>`;
 }
 function refreshAccentDemo(){
   const d = document.querySelector("#accentDemo");
+  const cn = document.querySelector("#accentCur");
+  if(cn) cn.textContent = "当前：" + ({"blue":"海蓝","pink":"樱粉","green":"豆绿","purple":"雾紫","peach":"蜜桃","teal":"青瓷","gray":"暖灰"}[document.body.dataset.accent || "blue"] || "");
   if(d) d.textContent = document.body.dataset.accent === "blue" ? "海蓝" : ({"pink":"樱粉","green":"豆绿","purple":"雾紫","peach":"蜜桃","teal":"青瓷","gray":"暖灰"}[document.body.dataset.accent] || "");
 }
-function accentPopToggle(e){
-  e && e.stopPropagation();
-  const pop = document.querySelector("#accentPop");
-  if(!pop) return;
-  const show = pop.style.display === "none";
-  pop.style.display = show ? "block" : "none";
-  if(show){
-    renderAccentDots(); refreshAccentDemo();
-    syncWarmToggle();
-  }
+function accentPanelToggle(){
+  const panel = document.querySelector("#accentPanel");
+  if(!panel) return;
+  const show = panel.style.display === "none";
+  panel.style.display = show ? "block" : "none";
+  if(show){ renderAccentPanel(); refreshAccentDemo(); syncWarmToggle(); }
 }
-document.addEventListener("click", e => {
-  const pop = document.querySelector("#accentPop");
-  if(pop && pop.style.display === "block" && !pop.contains(e.target)) pop.style.display = "none";
-});
 function setAccent(a){ document.body.dataset.accent = a; try{ localStorage.setItem("chaimi_accent", a); }catch(_){} }
 const thisMonth = () => new Date().toISOString().slice(0,7);
 /* 退款对「吸收」过滤：已被退款行引用的原交易 id 集合（流水/详情共用） */
