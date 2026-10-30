@@ -108,6 +108,9 @@ def _resolve_category(ledger: int, tx_type: str, name) -> int | None:
         (ledger,)).fetchall(), str(name).strip(), tx_type)
     return hit["id"] if hit else None
 
+# 公开别名：/api/app/record（App 记账桥）按交底复用同一实现，不复制逻辑
+resolve_category = _resolve_category
+
 # ---------- 渲染 ----------
 
 def _rowget(r, k, default=""):

@@ -90,7 +90,7 @@ app = FastAPI(title="柴米记账", lifespan=lifespan)
 _AUTH_EXEMPT = ("/healthz", "/login", "/api/login",
                 "/static/base.css", "/images/login-cow.png")   # 探活 + 登录页自身及其样式/图标；其余一律过门
 # 自带 Bearer Token 鉴权的网关端点：web_auth 门凭 Token 等价放行（status/test 无自带鉴权，仍过门）
-_BOT_TOKEN_PATHS = ("/api/bot/message", "/api/bot/receipt")
+_BOT_TOKEN_PATHS = ("/api/bot/message", "/api/bot/receipt", "/api/app/record")
 
 _SESSION_COOKIE = "chaimi_sess"
 _SESSION_TTL = 30 * 86400   # 登录态 30 天
@@ -1897,6 +1897,102 @@ def bot_message(body: BotMsgIn, request: Request):
     查账多轮可 20s+，网关侧技能调用超时建议 120s。"""
     _bot_guard(request.headers.get("authorization") or "")
     return {"reply": bot_core.handle(body.text, body.user or "gateway")}
+
+class AppRecordIn(BaseModel):
+    """记账桥（Android 无障碍 App）直记一笔的载荷：结构化字段，不走 LLM。
+    金额单位为**分**（int）；pay_id 为客户端幂等键
+    sha256(包名|支付时间秒|金额分|商户前8字)，服务端据此兜底防重。"""
+    pay_id: str
+    channel: str = "other"           # wechat | alipay | unionpay | sms | ...
+    amount: int                      # 分
+    merchant: str = ""
+    pay_method: str = ""             # 支付方式原文（"零钱"→微信零钱 等账户靠它匹配）
+    pay_time: str = ""               # YYYY-MM-DD 或 YYYY-MM-DD HH:MM；空=服务端当前时间
+    ledger_id: Optional[int] = None  # 空 = bot.default_ledger > 第一个账本
+    tx_type: str = "expense"         # expense | income
+
+_APP_RECORD_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$")
+_APP_RECORD_PID = re.compile(r"^[A-Za-z0-9_\-]{6,64}$")
+
+@app.post("/api/app/record")
+def app_record(body: AppRecordIn, request: Request):
+    """App 机器对机器记账（无 Cookie，Bearer Token = bot.api_token，mode=gateway 才放行）。
+    分类/账户由服务端解析：学习映射(category_mappings) → bot_core 两段式名匹配；
+    分类解析不到 → need_confirm=1 进网页待确认队列，人一键确认。
+    幂等：同账本下 tags.auto_pay_id 已存在 → duplicate=true，不再入库。"""
+    _bot_guard(request.headers.get("authorization") or "")
+
+    pid = (body.pay_id or "").strip()
+    if not _APP_RECORD_PID.fullmatch(pid):
+        raise HTTPException(422, "pay_id 必填且只能含字母/数字/_/-（8~64 位）")
+    if body.amount <= 0:
+        raise HTTPException(422, "amount 必须为正整数（单位：分）")
+    if body.tx_type not in ("expense", "income"):
+        raise HTTPException(422, "tx_type 只支持 expense / income")
+    pay_time = (body.pay_time or "").strip()
+    if pay_time and not _APP_RECORD_TIME.fullmatch(pay_time):
+        raise HTTPException(422, "pay_time 只支持 YYYY-MM-DD 或 YYYY-MM-DD HH:MM")
+
+    # 账本：请求指定 > bot.default_ledger > 第一个账本
+    ledger = body.ledger_id or int(_bot_cfg().get("default_ledger") or 0) or None
+    if ledger is None:
+        row = conn().execute("SELECT id FROM ledgers ORDER BY sort, id LIMIT 1").fetchone()
+        if row is None:
+            raise HTTPException(404, "还没有任何账本")
+        ledger = row["id"]
+    _ledger_or_404(ledger)
+
+    # 幂等：同账本下 auto_pay_id 已存在 → 返回旧 id，不再入库。
+    # tags 由 json.dumps 落库（默认分隔符 ": "），兼容带空格/不带空格两种历史格式。
+    dup = conn().execute(
+        "SELECT id FROM transactions WHERE ledger_id=? AND "
+        "(tags LIKE ? OR tags LIKE ?)",
+        (ledger, f'%"auto_pay_id":"{pid}"%', f'%"auto_pay_id": "{pid}"%')).fetchone()
+    if dup:
+        return {"id": dup["id"], "duplicate": True,
+                "category_resolved": True, "account_resolved": True}
+
+    merchant = (body.merchant or "").strip()[:60]
+    pm = (body.pay_method or "").strip()
+    tx_type = body.tx_type
+
+    # 分类：学习映射（网页确认过一次的商户自动记住）→ 两段式名匹配 → None
+    cat_id = None
+    mrow = conn().execute(
+        "SELECT category_id FROM category_mappings WHERE ledger_id=? AND flow_type=? AND source=?",
+        (ledger, tx_type, merchant)).fetchone()
+    if mrow:
+        cat_id = mrow["category_id"]
+    else:
+        cat_id = bot_core.resolve_category(
+            ledger, tx_type, merchant or pm or body.channel)
+
+    # 账户：pay_method 与账户名双向包含（"零钱"→微信零钱 等）；匹配不到留空
+    account_id = None
+    if pm:
+        for r in conn().execute("SELECT id, name FROM accounts WHERE ledger_id=?", (ledger,)):
+            n = (r["name"] or "").strip()
+            if n and (n in pm or pm in n):
+                account_id = r["id"]
+                break
+
+    # 商户空 → name 兜底支付方式/渠道（交底 §2.4）
+    name = (merchant or pm or body.channel)[:40]
+    with conn() as c:
+        tid = dbm.insert_tx(
+            c, ledger, type=tx_type, amount=body.amount,
+            category_id=cat_id, account_id=account_id,
+            date=pay_time or datetime.now().strftime("%Y-%m-%d %H:%M"),
+            name=name, merchant=merchant or None,
+            tags={"auto_pay_id": pid, "channel": body.channel},
+            source="auto",
+            ai_meta={"via": "app-auto", "time_source": "ai" if len(pay_time) > 10 else "none"},
+            need_confirm=cat_id is None,
+        )
+    _bump_rev()   # 唤醒网页长轮询（与 bot 写库同源）
+    return {"id": tid, "duplicate": False,
+            "category_resolved": cat_id is not None,
+            "account_resolved": account_id is not None}
 
 @app.post("/api/bot/receipt")
 async def bot_receipt(request: Request, file: UploadFile = File(...), user: str = "gateway"):
