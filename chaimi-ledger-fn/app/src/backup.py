@@ -69,7 +69,7 @@ def create_backup(period: str = "") -> dict:
     db_file = config.db_path()
     if not db_file.is_file():
         raise ValueError(f"数据库文件不存在，已中止备份：{db_file}")
-    src = sqlite3.connect(f"file:{db_file}?mode=ro", uri=True)
+    src = sqlite3.connect(f"file:{db_file}?mode=ro&immutable=1", uri=True)
     try:
         src.execute("SELECT 1 FROM transactions LIMIT 1")
     except sqlite3.Error as e:
@@ -116,10 +116,11 @@ def _backup_kind(name: str) -> str:
 
 def _backup_probe(f) -> tuple[bool, int]:
     """只读探测备份库：返回 (是否有效, 流水笔数)。
-    以 mode=ro 打开——普通连接会在备份旁生成 -wal/-shm 残渣（历史上出现过）。
+    用 mode=ro&immutable=1 打开——单纯的 ro 打开 WAL 模式库仍会建 -shm/-wal 残渣，
+    immutable 声明"文件不会被改动"，不建锁文件、不写旁路文件。
     空库（无 transactions 表或 0 笔）判为无效：这种备份恢复等于清账。"""
     try:
-        c = sqlite3.connect(f"file:{f}?mode=ro", uri=True)
+        c = sqlite3.connect(f"file:{f}?mode=ro&immutable=1", uri=True)
         try:
             n = c.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
             return True, int(n)
@@ -146,7 +147,7 @@ def restore_backup(name: str) -> None:
     空库校验是硬门槛——空 SQLite 文件能通过 integrity_check，过去一旦点恢复就等于清账。"""
     src_file = _locate(name)
     # 先校验备份完整性；非 SQLite 文件统一转 ValueError（server 映射 400，不再裸 500）
-    chk = sqlite3.connect(f"file:{src_file}?mode=ro", uri=True)
+    chk = sqlite3.connect(f"file:{src_file}?mode=ro&immutable=1", uri=True)
     try:
         ok = chk.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         try:
@@ -165,7 +166,7 @@ def restore_backup(name: str) -> None:
     # 在 Windows 下直接被旧句柄锁死无法替换；backup 写同一文件，所有连接立即可见
     target = config.db_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    src = sqlite3.connect(src_file)
+    src = sqlite3.connect(f"file:{src_file}?mode=ro&immutable=1", uri=True)
     dst = sqlite3.connect(target, timeout=10)
     try:
         src.backup(dst)
@@ -369,7 +370,7 @@ def webdav_download(name: str) -> dict:
             (config.backup_dir() / conf_remote).write_bytes(r.read())
     except (urllib.error.HTTPError, urllib.error.URLError, OSError):
         pass   # 配置副本缺失可容忍
-    chk = sqlite3.connect(dest)
+    chk = sqlite3.connect(f"file:{dest}?mode=ro&immutable=1", uri=True)
     try:
         ok = chk.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     finally:
@@ -405,6 +406,9 @@ class AutoBackup:
                     keep_days = int(cfg.get("keep_days", 7))
                     if keep_days > 0:
                         self.last_result = create_backup("daily")
+                        # 日备留痕：此前循环成功/失败均无日志，凌晨没跑只能靠猜（UTC 时区事故即如此排查出的）
+                        _log.info(f"自动备份：{self.last_result.get('file', '?')} "
+                                  f"({self.last_result.get('size', 0)//1024}KB)")
                         _cleanup_old(keep_days, now, kind="daily")
                         self._webdav_auto()
                         _webdav_prune(keep_days, now)
@@ -412,13 +416,16 @@ class AutoBackup:
                         # 12-31 年备优先（年备已覆盖当月），跳过月备
                         if int(cfg.get("keep_years", 3)) > 0:
                             self.last_result = create_backup("yearly")
+                            _log.info(f"自动备份（年）：{self.last_result.get('file', '?')}")
                             _cleanup_old(int(cfg.get("keep_years", 3)), now, kind="yearly")
                             self._webdav_auto()
                     elif _is_last_day_of_month(now) and int(cfg.get("keep_months", 3)) > 0:
                         self.last_result = create_backup("monthly")
+                        _log.info(f"自动备份（月）：{self.last_result.get('file', '?')}")
                         _cleanup_old(int(cfg.get("keep_months", 3)), now, kind="monthly")
                         self._webdav_auto()
             except Exception as e:  # 备份失败不中断循环
+                _log.error(f"自动备份失败：{e}")
                 self.last_result = {"error": str(e)[:300]}
             time.sleep(60)
 

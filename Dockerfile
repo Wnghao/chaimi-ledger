@@ -11,7 +11,14 @@ ENV PYTHONUNBUFFERED=1 \
     TRIM_PKGVAR=/data \
     CHAIMI_DB=/data/chaimi.db \
     CHAIMI_CONF=/data/chaimi.conf \
-    CHAIMI_BOT_BIND=off
+    CHAIMI_BOT_BIND=off \
+    TZ=Asia/Shanghai
+
+# 时区：slim 基础镜像默认 UTC，自动备份「每天 3 点」与周期记账「到期日当天」
+# 全按 datetime.now() 判断——不修时区会整体晚 8 小时（备份实际 11 点才跑）
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
 
 # Pillow/pycryptodome 均有 manylinux wheel，无需编译链
 COPY chaimi-ledger-fn/app/src/requirements.txt /tmp/requirements.txt
