@@ -1,4 +1,8 @@
 const $ = s => document.querySelector(s);
+const SRC_CN = {app:"手动", recur:"周期", bot:"机器人", auto:"App", manual:"",
+  qianji:"钱迹", wechat:"微信", alipay:"支付宝", jd:"京东", unionpay:"云闪付",
+  meituan:"美团", eleme:"饿了么", pdd:"拼多多", douyin:"抖音", taobao:"淘宝", xianyu:"闲鱼"};
+const srcCn = s => SRC_CN[s] || s;   // 未知平台显示原文
 const fmt = c => (c/100).toFixed(2);
 
 const CUR_SYMBOLS = {CNY:"¥", USD:"$", EUR:"€", JPY:"¥", HKD:"HK$", GBP:"£"};
