@@ -78,7 +78,7 @@ async function aiToday(){
         const sub = [t.category_name || TYPE_CN[t.type] || "", (t.date||"").slice(11,16)].filter(Boolean).join(" · ");
         return `<div class="ai-tr" onclick="openEdit(${t.id})">${txIcon(t)}
           <div class="ai-trb"><div class="ai-trn">${esc(t.name || t.note || "（未命名）")}</div><div class="sub" style="font-size:11px;margin-top:1px">${esc(sub)}</div></div>
-          <div class="ai-tra num" style="color:${color}">${sign}${fmt(t.amount)}</div></div>`;
+          <div class="ai-tra num" style="color:${color}">${sign}${curSym()}${fmt(t.amount)}</div></div>`;
       }).join("") +
       (rows.length > 3 ? `<div class="sub" style="font-size:11px;text-align:center;padding:7px 0 8px;color:var(--muted)">还有 ${rows.length - 3} 笔 · 点顶部看全部</div>` : "");
   }catch(_){ box.style.display = "none"; }   // 接口异常藏卡不占位，引导区仍兜底
@@ -206,7 +206,7 @@ function txRow(t, mode){
   else if(pv && t.dup_hint) tags.push(`<button class="tag dup-hint" title="${esc(dupHintText(t.dup_hint))}" onclick="impSkipRow(${t._pvIdx})">疑似重复 点击跳过</button>`);
   tags.push(...confTags(t));
   if(!pv) tags.unshift(txNameChip(t));   // 流水行：名称徽章置首（标题已含 分类·备注）
-  const srcTag = t.source && t.source!=="manual" ? `<span class="tag plain tx-src">${t.source}</span>` : "";
+  const srcTag = t.source && t.source!=="manual" ? `<span class="tag plain tx-src">${srcCn(t.source)}</span>` : "";
   const rcpTag = t.receipt_path ? `<span class="tag plain tx-src" title="查看小票" onclick="event.stopPropagation();viewReceipt('${qEsc(t.receipt_path)}')">🧾</span>` : "";
   // 源栈：jd 在上、小票在下；只有其中一个时单独显示
   const srcStack = (srcTag || rcpTag) ? `<div class="tx-src-stack">${srcTag}${rcpTag}</div>` : "";
@@ -278,7 +278,7 @@ function txRow(t, mode){
   const originRow = makeRow(ro, {tags: roTags, catHtml: "", clickAttr: ` onclick="event.stopPropagation();openEdit(${ro.id})"`});
   // 两者包进同一 .tx-side wrapper 内部横向排列，整体贴右
   const sideSrc = t.source && t.source!=="manual"
-    ? `<span class="tag plain">${t.source}</span>` : "";
+    ? `<span class="tag plain">${srcCn(t.source)}</span>` : "";
   const sideCells = `<div class="tx-side"><div class="tx-side-net num" style="color:${netColor}" title="${netTitle}">${netSign}${curSym()}${netVal}</div>${sideSrc}</div>`;
   return `<div class="tx-card tx-card-double" onclick="openEdit(${t.id})" data-cat="${esc(catSlug)}"${t.id ? ` data-txid="${t.id}"` : ""}>${refundRow}${originRow}${sideCells}</div>`;
 }

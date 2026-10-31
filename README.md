@@ -102,6 +102,9 @@ services:
       # 容器下 18710 已映射给主服务；「微信机器人网关模式」会再起 sidecar 抢同一端口
       # 导致容器反复重启（镜像已默认 off，这里显式写出便于自查）
       CHAIMI_BOT_BIND: "off"
+      # 自动备份「每天 3 点」与周期记账「到期日当天」按容器本地时间触发，
+      # 镜像已默认 Asia/Shanghai；海外部署者按需覆盖
+      TZ: "Asia/Shanghai"
     ports:
       - "18710:18710"
     volumes:

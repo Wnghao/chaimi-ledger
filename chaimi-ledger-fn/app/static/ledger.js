@@ -570,7 +570,9 @@ function renderRenqing(){
   }).join("");
   $("#renqingEmpty").style.display = rq.length ? "none" : "block";
   $("#renqingTable").style.display = rq.length ? "" : "none";
-  $("#renqingEmpty").textContent = rqList.length ? `没有匹配「${esc(q)}」的名称` : "暂无人情记录：分类为「人情往来」的流水会按名称显示在这里";
+  $("#renqingEmpty").innerHTML = rqList.length
+    ? `没有匹配「${esc(q)}」的名称`
+    : `<div class="re-ic">🧧</div><div class="re-t">还没有人情往来记录</div><div class="re-d">把流水分类为「人情往来」，就会按对方名称汇总在这里</div>`;
 }
 bindSearch($("#rq_q"), $("#rq_q_clear"), renderRenqing);
 async function showPersonDetail(person, refresh){
