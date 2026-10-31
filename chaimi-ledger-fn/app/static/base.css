@@ -463,10 +463,6 @@ body[data-accent="gray"]{--primary:var(--m-gray);--primary-2:var(--m-gray-bd);--
 /* 弹窗遮罩加磨砂玻璃（现代感；--mask 透明度相应调浅） */
 .modal-mask{backdrop-filter:blur(5px) saturate(1.1);-webkit-backdrop-filter:blur(5px) saturate(1.1)}
 
-/* 顶栏主题色 popover */
-.accent-pop{position:absolute;top:44px;right:0;background:var(--card);border:1px solid var(--border);
-  border-radius:14px;box-shadow:var(--shadow-md);padding:14px 16px;z-index:80;min-width:190px}
-.accent-pop-title{font-size:11px;color:var(--muted);letter-spacing:.5px;margin-bottom:10px;font-weight:600}
 .accent-pop .accent-row{flex-wrap:wrap;gap:9px}
 .accent-pop .accent-dot{width:24px;height:24px}
 .accent-cur{font-size:12px;color:var(--fg);font-weight:600;margin-left:4px}
@@ -504,11 +500,54 @@ body[data-accent="gray"]{--primary:var(--m-gray);--primary-2:var(--m-gray-bd);--
 }
 /* popover 头部：标题 + 暖/原 切换 */
 .accent-pop-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
-.accent-pop-head .accent-pop-title{margin-bottom:0}
-.warm-toggle{display:inline-flex;background:var(--chip);border-radius:999px;padding:2px}
+.accent-pop-head .warm-toggle{display:inline-flex;background:var(--chip);border-radius:999px;padding:2px}
 .warm-toggle button{border:none;background:none;font-size:11px;padding:3px 10px;border-radius:999px;
   color:var(--muted);cursor:pointer;font-family:inherit;transition:background .15s,color .15s}
 .warm-toggle button:last-child{margin-left:2px}
 body[data-warm="on"] .warm-toggle #warmOn,
 body[data-warm="off"] .warm-toggle #warmOff{background:var(--card);color:var(--fg);font-weight:600;
   box-shadow:0 1px 3px rgba(122,84,54,.18)}
+
+/* ===== 自绘下拉（csel.js 配套）：按钮承接原 select 规格，面板完全自绘 ===== */
+.csel{position:relative;display:inline-flex;max-width:100%;min-width:0;vertical-align:middle}
+.csel-btn{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%;
+  min-height:36px;padding:0 28px 0 12px;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;color:var(--fg);font:inherit;font-size:13.5px;cursor:pointer;text-align:left;
+  transition:border-color .15s,box-shadow .15s,background .15s;min-width:0}
+.csel-btn:hover{border-color:var(--muted)}
+.csel.open .csel-btn,.csel-btn:focus-visible{outline:none;border-color:var(--primary);
+  box-shadow:0 0 0 3px var(--primary-bg)}
+.csel-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.csel-chev{flex:none;display:inline-flex;color:var(--muted);transition:transform .18s}
+.csel.open .csel-chev{transform:rotate(180deg)}
+.csel.dis .csel-btn{opacity:.55;cursor:not-allowed}
+/* 隐藏的原生 select：仍在 DOM 参与逻辑，但不占视觉 */
+select.csel-native{position:absolute;width:1px !important;height:1px !important;opacity:0;
+  pointer-events:none;left:0;top:0;padding:0;border:none}
+/* 面板 */
+.csel-panel{position:absolute;top:calc(100% + 5px);left:0;z-index:92;width:max-content;
+  min-width:100%;max-width:280px;background:var(--card);border:1px solid var(--border);
+  border-radius:12px;box-shadow:var(--shadow-lg);padding:5px;max-height:264px;overflow-y:auto;
+  animation:cselIn .14s ease-out}
+.csel-panel.up{top:auto;bottom:calc(100% + 5px);animation-name:cselInUp}
+@keyframes cselIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes cselInUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.csel-opt{padding:8px 11px;border-radius:8px;font-size:13px;color:var(--fg);cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.45;transition:background .1s}
+.csel-opt:hover,.csel-opt.act{background:var(--hover)}
+.csel-opt.on{color:var(--primary);font-weight:600}
+.csel-opt.on::after{content:"✓";float:right;font-weight:700;margin-left:10px}
+.csel-opt.dis{opacity:.45;cursor:not-allowed}
+.csel-group{font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.5px;
+  padding:7px 11px 3px;text-transform:uppercase}
+.csel-empty{padding:12px;color:var(--muted);font-size:12.5px;text-align:center}
+/* 各容器尺寸承接（对齐此前 .schips select / .field select / .st-sec select 的规格） */
+.field .csel{width:100%}
+.field .csel-btn{height:42px;border-radius:12px;font-size:14px;padding:0 30px 0 13px}
+.schips .csel{flex:none}
+.schips .csel-btn{height:30px;padding:0 26px 0 12px;font-size:13px;border-radius:999px}
+.st-sec .csel{width:100%}
+.st-sec .csel-btn{min-height:38px;border-radius:8px;padding:0 28px 0 10px}
+.bk-bubble .txf-item .csel{width:100%}
+.pv-list .tx-row .tx-sub .csel{max-width:110px;min-width:80px}
+.csel:not(.has-val) .csel-txt{color:var(--muted)}
